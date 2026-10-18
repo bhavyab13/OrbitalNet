@@ -2,7 +2,7 @@
 import { verify, type Manifest } from "./protocol.js";
 import { env } from "./config.js";
 
-export type Entry = { operator_id: string; node_id: string; base_url: string; manifest: Manifest; verified: boolean; last_seen: string; online: boolean };
+export type Entry = { operator_id: string; node_id: string; base_url: string; manifest: Manifest; verified: boolean; last_seen: string; online: boolean; trusted: boolean; untrusted_reason?: string };
 const entries = new Map<string, Entry>();
 const seedUrls = new Set<string>(env.REGISTRY_SEED);
 
@@ -18,8 +18,9 @@ export async function register(urlOrBase: string): Promise<Entry> {
   const manifest: Manifest = await fetchJson(url);
   const verified = await verify(manifest, manifest.public_key);
   const base_url = (manifest.base_url || urlOrBase.replace(/\/\.well-known\/.*$/, "")).replace(/\/$/, "");
-  const entry: Entry = { operator_id: manifest.operator_id, node_id: manifest.node_id, base_url, manifest, verified, last_seen: new Date().toISOString(), online: true };
-  const isNew = !entries.has(manifest.operator_id);
+  const prev = entries.get(manifest.operator_id);
+  const entry: Entry = { operator_id: manifest.operator_id, node_id: manifest.node_id, base_url, manifest, verified, last_seen: new Date().toISOString(), online: true, trusted: prev?.trusted ?? true, untrusted_reason: prev?.untrusted_reason };
+  const isNew = !prev;
   entries.set(manifest.operator_id, entry);
   seedUrls.add(base_url);
   if (isNew) console.log(`[registry] ${verified ? "verified" : "UNVERIFIED"} provider ${manifest.operator_id} (${manifest.node_id}) at ${base_url}`);
@@ -38,4 +39,5 @@ export function startCrawler(intervalMs = 10_000) { crawl().catch(() => {}); set
 export function list(): Entry[] { return [...entries.values()]; }
 export function byOperator(id: string) { return entries.get(id); }
 export function byNode(node_id: string) { return [...entries.values()].find((e) => e.node_id === node_id); }
+export function markUntrusted(operator_id: string, reason: string) { const e = entries.get(operator_id); if (e) { e.trusted = false; e.untrusted_reason = reason; } }
 export function reset() { entries.clear(); }

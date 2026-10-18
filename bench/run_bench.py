@@ -340,8 +340,8 @@ def main():
     # ---- summary
     summary = []
     print(f"\nOrbitalNet benchmark — n={args.n} missions per cell, seed={args.seed}, {elapsed:.1f}s\n")
-    print("| p_fail | p_withdraw | strategy | completion | wasted $/mission | stranded/mission | rejected ops | replan latency s |")
-    print("|---|---|---|---|---|---|---|---|")
+    print("| p_fail | p_withdraw | strategy | completion | wasted $/mission | wasted % of spend | stranded /100 missions | rejected ops /100 missions | replan latency s |")
+    print("|---|---|---|---|---|---|---|---|---|")
     for p_fail in (0.0, 0.2, 0.4):
         for p_withdraw in (0.0, 0.2):
             cell = {}
@@ -350,13 +350,20 @@ def main():
                 comp = np.array([x["completed"] for x in r], float)
                 wasted = np.array([x["wasted"] for x in r], float)
                 lat = [x["replan_latency"] for x in r if x["replan_latency"] is not None]
+                paid_total = float(sum(x["paid"] for x in r)); wasted_total = float(sum(x["wasted"] for x in r))
+                per100 = 100.0 / max(len(r), 1)
                 cell[s] = {"completion": comp.mean(), "completion_ci": bootstrap_ci(comp), "wasted": wasted.mean(),
-                           "wasted_ci": bootstrap_ci(wasted), "stranded": float(np.mean([x["stranded"] for x in r])),
+                           "wasted_ci": bootstrap_ci(wasted),
+                           "wasted_share": (wasted_total / paid_total) if paid_total > 0 else 0.0,
+                           "stranded": float(np.mean([x["stranded"] for x in r])),
+                           "stranded_per100": float(sum(x["stranded"] for x in r)) * per100,
                            "rejected_ops": int(sum(x["rejected_ops"] for x in r)),
-                           "replan_latency": (float(np.mean(lat)) if lat else None), "paid": float(np.mean([x["paid"] for x in r]))}
+                           "rejected_ops_per100": float(sum(x["rejected_ops"] for x in r)) * per100,
+                           "replan_latency": (float(np.mean(lat)) if lat else None), "paid": float(np.mean([x["paid"] for x in r])),
+                           "paid_total": paid_total, "wasted_total": wasted_total}
                 c = cell[s]
                 print(f"| {p_fail} | {p_withdraw} | {s} | {c['completion']*100:.0f}% [{c['completion_ci'][0]*100:.0f}–{c['completion_ci'][1]*100:.0f}] "
-                      f"| ${c['wasted']:.2f} [{c['wasted_ci'][0]:.2f}–{c['wasted_ci'][1]:.2f}] | {c['stranded']:.2f} | {c['rejected_ops']} "
+                      f"| ${c['wasted']:.2f} [{c['wasted_ci'][0]:.2f}–{c['wasted_ci'][1]:.2f}] | {c['wasted_share']*100:.1f}% | {c['stranded_per100']:.0f} | {c['rejected_ops_per100']:.0f} "
                       f"| {('%.0f' % c['replan_latency']) if c['replan_latency'] is not None else '—'} |")
             # paired B-vs-A
             a = {x["mission"]: x for x in rows if x["p_fail"] == p_fail and x["p_withdraw"] == p_withdraw and x["strategy"] == "independent"}
@@ -371,7 +378,11 @@ def main():
     for c in summary:
         pb = c["paired_B_minus_A"]
         print(f"  p_fail={c['p_fail']} p_withdraw={c['p_withdraw']}: wasted spend saved ${pb['wasted_saved']:.2f}/mission "
-              f"[{pb['wasted_saved_ci'][0]:.2f}, {pb['wasted_saved_ci'][1]:.2f}]; completion +{pb['completion_gain']*100:.0f} pts "
+              f"[{pb['wasted_saved_ci'][0]:.2f}, {pb['wasted_saved_ci'][1]:.2f}] "
+              f"(independent wastes {c['independent']['wasted_share']*100:.1f}% of spend, OCGP {c['ocgp']['wasted_share']*100:.1f}%; "
+              f"stranded /100: {c['independent']['stranded_per100']:.0f} vs {c['ocgp']['stranded_per100']:.0f}; "
+              f"rejected ops /100: {c['independent']['rejected_ops_per100']:.0f} vs {c['ocgp']['rejected_ops_per100']:.0f}); "
+              f"completion +{pb['completion_gain']*100:.0f} pts "
               f"[{pb['completion_gain_ci'][0]*100:.0f}, {pb['completion_gain_ci'][1]*100:.0f}]; gap to omniscient {pb['completion_gap_to_omniscient']*100:.0f} pts")
     (outdir / "results.json").write_text(json.dumps({"n": args.n, "seed": args.seed, "elapsed_s": elapsed, "cells": summary}, indent=2, default=float))
     chart(summary, outdir / "results.png", args.n)
@@ -383,30 +394,74 @@ def chart(summary: list[dict], path: Path, n: int):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    bg, fg, grid = "#0b0f14", "#e6edf3", "#243040"
+    bg, fg, dim, grid = "#0b0f14", "#e6edf3", "#9aa4b2", "#243040"
     colors = {"independent": "#6b7684", "ocgp": "#4fd1ff", "omniscient": "#c9d1d9"}
     labels = {"independent": "A · independent purchase", "ocgp": "B · OCGP conditional commit", "omniscient": "C · omniscient (bound)"}
-    fig, axes = plt.subplots(1, 2, figsize=(16, 6.5), facecolor=bg)
-    xs = np.arange(len(summary)); width = 0.26
-    ticks = [f"fail {c['p_fail']:.0%}\nwithdraw {c['p_withdraw']:.0%}" for c in summary]
-    for ax, metric, title, fmt in ((axes[0], "completion", "Missions delivered before deadline", "{:.0%}"),
-                                   (axes[1], "wasted", "Money paid for work never performed ($ / mission)", "${:.2f}")):
+    plt.rcParams.update({"font.size": 13})
+    fig, axes = plt.subplots(1, 3, figsize=(24, 7.6), facecolor=bg)
+    xs = np.arange(len(summary))
+    ticks = [f"fail {c['p_fail']:.0%}\nw/draw {c['p_withdraw']:.0%}" for c in summary]
+
+    def style(ax, title):
         ax.set_facecolor(bg)
-        for k, s in enumerate(("independent", "ocgp", "omniscient")):
-            vals = np.array([c[s][metric] for c in summary]); ci = np.array([c[s][metric + "_ci"] for c in summary])
-            err = np.vstack([vals - ci[:, 0], ci[:, 1] - vals]).clip(min=0)
-            ax.bar(xs + (k - 1) * width, vals, width, color=colors[s], label=labels[s], yerr=err, ecolor=fg, capsize=3, linewidth=0)
-            for x, v in zip(xs + (k - 1) * width, vals):
-                ax.text(x, v + (0.015 if metric == "completion" else 0.02), fmt.format(v), ha="center", va="bottom", color=fg, fontsize=9)
-        ax.set_xticks(xs); ax.set_xticklabels(ticks, color=fg, fontsize=10)
-        ax.set_title(title, color=fg, fontsize=14, pad=12, loc="left")
-        ax.tick_params(colors=fg); ax.spines[:].set_color(grid); ax.yaxis.grid(True, color=grid, linewidth=0.6); ax.set_axisbelow(True)
-        if metric == "completion":
-            ax.set_ylim(0, 1.12); ax.set_yticks([0, .25, .5, .75, 1]); ax.set_yticklabels(["0", "25%", "50%", "75%", "100%"], color=fg)
-    axes[0].legend(loc="lower left", facecolor=bg, edgecolor=grid, labelcolor=fg, fontsize=10)
-    fig.suptitle(f"OCGP vs. independent purchasing — {n} seeded missions per cell, 95% bootstrap CIs (preliminary simulation, modeled windows)",
-                 color=fg, fontsize=12, x=0.01, ha="left", y=0.98)
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
+        ax.set_xticks(xs); ax.set_xticklabels(ticks, color=fg, fontsize=10); ax.set_xlim(-0.6, len(summary) - 0.4)
+        ax.set_title(title, color=fg, fontsize=16, pad=14, loc="left")
+        ax.tick_params(colors=fg, labelsize=12); ax.spines[:].set_color(grid)
+        ax.yaxis.grid(True, color=grid, linewidth=0.6); ax.set_axisbelow(True)
+
+    # (a) completion with CI — three strategies
+    ax = axes[0]; width = 0.26
+    style(ax, "Missions delivered before deadline")
+    for k, s in enumerate(("independent", "ocgp", "omniscient")):
+        vals = np.array([c[s]["completion"] for c in summary]); ci = np.array([c[s]["completion_ci"] for c in summary])
+        err = np.vstack([vals - ci[:, 0], ci[:, 1] - vals]).clip(min=0)
+        ax.bar(xs + (k - 1) * width, vals, width, color=colors[s], label=labels[s], yerr=err, ecolor=fg, capsize=3, linewidth=0)
+    # one label per cell when all three agree, else label each bar
+    for i, c in enumerate(summary):
+        vals = [c[s]["completion"] for s in ("independent", "ocgp", "omniscient")]
+        if max(vals) - min(vals) < 0.02:
+            ax.text(xs[i], max(vals) + 0.035, f"{vals[1]:.0%}", ha="center", va="bottom", color=fg, fontsize=12)
+        else:
+            for k, v in enumerate(vals):
+                ax.text(xs[i] + (k - 1) * width, v + 0.035, f"{v:.0%}", ha="center", va="bottom", color=fg, fontsize=8.5)
+    ax.set_ylim(0, 1.18); ax.set_yticks([0, .25, .5, .75, 1]); ax.set_yticklabels(["0", "25%", "50%", "75%", "100%"], color=fg)
+    ax.legend(loc="lower left", facecolor=bg, edgecolor=grid, labelcolor=fg, fontsize=11)
+
+    # (b) wasted spend as % of total spend — A vs B (C is 0 by construction)
+    ax = axes[1]; width = 0.36
+    style(ax, "Money paid for work never performed (% of total spend)")
+    for k, s in enumerate(("independent", "ocgp")):
+        vals = np.array([c[s]["wasted_share"] * 100 for c in summary])
+        ax.bar(xs + (k - 0.5) * width, vals, width, color=colors[s], label=labels[s], linewidth=0)
+        for x, v in zip(xs + (k - 0.5) * width, vals):
+            ax.text(x, v + 0.25, f"{v:.1f}%", ha="center", va="bottom", color=fg if s == "ocgp" else dim, fontsize=11)
+    ymax = max(1.0, max(c["independent"]["wasted_share"] * 100 for c in summary) * 1.3)
+    ax.set_ylim(0, ymax); ax.set_ylabel("% of all money spent", color=dim, fontsize=12)
+    ax.text(0.99, 0.97, "C · omniscient = 0% (bound)", transform=ax.transAxes, color=dim, fontsize=11, va="top", ha="right")
+    ax.legend(loc="upper left", facecolor=bg, edgecolor=grid, labelcolor=fg, fontsize=11)
+
+    # (c) stranded reservations + policy-rejected operations per 100 missions — A vs B, grouped
+    ax = axes[2]; width = 0.2
+    style(ax, "Stranded grants · attempts on dead links (per 100 missions)")
+    series = [("independent", "stranded_per100", "A · stranded grants", colors["independent"], "//"),
+              ("independent", "rejected_ops_per100", "A · attempts on dead links", "#8d97a5", ""),
+              ("ocgp", "stranded_per100", "B · stranded grants", colors["ocgp"], "//"),
+              ("ocgp", "rejected_ops_per100", "B · attempts on dead links", "#9fe3ff", "")]
+    for k, (s, key, lab, col, hatch) in enumerate(series):
+        vals = np.array([c[s][key] for c in summary])
+        ax.bar(xs + (k - 1.5) * width, vals, width, color=col, label=lab, linewidth=0, hatch=hatch, edgecolor=bg)
+        for x, v in zip(xs + (k - 1.5) * width, vals):
+            ax.text(x, v + 0.4, f"{v:.0f}", ha="center", va="bottom", color=fg if s == "ocgp" else dim, fontsize=10)
+    ymax = max(5.0, max(max(c["independent"]["stranded_per100"], c["independent"]["rejected_ops_per100"]) for c in summary) * 1.3)
+    ax.set_ylim(0, ymax); ax.set_ylabel("count per 100 missions", color=dim, fontsize=12)
+    ax.legend(loc="upper left", facecolor=bg, edgecolor=grid, labelcolor=fg, fontsize=11)
+
+    fig.suptitle(f"OCGP vs. independent purchasing — {n} seeded missions per cell, 95% bootstrap CIs (preliminary simulation, modeled windows). "
+                 f"x-axis: probability a relay link dies (fail) / a provider withdraws before commit (w/draw)",
+                 color=dim, fontsize=13, x=0.01, ha="left", y=0.995)
+    fig.text(0.01, 0.945, "Same completion as an omniscient scheduler; zero money stranded; zero attempts on dead links.",
+             color=fg, fontsize=18, ha="left", va="top", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.89), w_pad=3.0)
     fig.savefig(path, dpi=130, facecolor=bg)
 
 

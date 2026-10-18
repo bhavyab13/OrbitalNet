@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import time
 
@@ -10,6 +11,18 @@ import httpx
 
 from . import config
 from .world import World
+
+
+def make_degraded_crop(image_path: str, scale: int = 8, quality: int = 70) -> tuple[str, int]:
+    """Real deliverable for a low-fidelity plan: the scene downsampled 1/scale as JPEG. Returns (b64, bytes)."""
+    from PIL import Image  # pillow
+    with Image.open(image_path) as im:
+        im = im.convert("RGB")
+        small = im.resize((max(1, im.width // scale), max(1, im.height // scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    small.save(buf, format="JPEG", quality=quality)
+    raw = buf.getvalue()
+    return base64.b64encode(raw).decode(), len(raw)
 
 
 class Runner:
@@ -98,9 +111,25 @@ class Runner:
         w = self.w
         plan = m["plan"]
         legs = plan["legs"]
+        m["fidelity"] = plan.get("fidelity") or m.get("fidelity") or "full"
         if not resume:
-            w.narrate("executing", f"Plan '{plan.get('label')}' committed. Executing {len(legs)} legs across {len({l.get('operator_id') for l in legs if l.get('operator_id')})} independent operators.", mission_id)
-        self._set(m, "RUNNING")
+            w.narrate("executing", f"Plan '{plan.get('label')}' committed ({m['fidelity']} fidelity). Executing {len(legs)} legs across {len({l.get('operator_id') for l in legs if l.get('operator_id')})} independent operators.", mission_id)
+        # Low-fidelity plan: the product is a real downsampled crop produced at the source, no on-orbit analysis.
+        if m["fidelity"] == "low" and not m.get("result"):
+            try:
+                sc = m["mission"].get("scene") or {}
+                degraded = m["mission"].get("degraded") or {}
+                b64, nbytes = make_degraded_crop(str(config.ROOT / sc.get("image_file", "data/papua_VIIRS_SNPP_CorrectedReflectance_BandsM11-I2-I1.jpg")))
+                m["result"] = {"kind": "raw_crop", "fidelity": "low",
+                               "summary": {"note": "downsampled crop delivered without on-orbit analysis", "bbox": sc.get("bbox"), "scale": "1/8",
+                                           "real_bytes": nbytes, "modeled_mb": degraded.get("payload_mb", plan.get("payload_mb"))},
+                               "thumbnail_b64": b64, "geojson": {"type": "FeatureCollection", "features": []}}
+                m["committed"] = {"node_id": m["mission"]["source_node"], "result_mb": float(degraded.get("payload_mb", plan.get("payload_mb") or 40)), "fidelity": "low"}
+                w.emit({"type": "result", "mission_id": mission_id, "fidelity": "low", "node_id": m["mission"]["source_node"], "result": {"kind": "raw_crop", "summary": m["result"]["summary"]}})
+                w.narrate("executing", f"{m['mission']['source_node']} produced the degraded product: {degraded.get('label', 'downsampled crop')} ({nbytes/1000:.0f} KB real, {m['committed']['result_mb']:.0f} MB modeled). No on-orbit analysis.", mission_id)
+            except Exception as e:
+                w.emit({"type": "warning", "mission_id": mission_id, "text": f"could not build degraded crop: {e}"})
+        self._set(m, "RUNNING", fidelity=m["fidelity"])
         try:
             for idx, leg in enumerate(legs):
                 if stop.is_set():
@@ -155,9 +184,9 @@ class Runner:
                     if is_downlink:
                         m["delivered_sim_t"] = round(w.sim_t, 2)
                         m["delivery_latency_s"] = round(w.sim_t - m.get("arrival_sim_t", 0), 1)
-                        self._set(m, "DELIVERED", delivered_sim_t=m["delivered_sim_t"])
-                        w.emit({"type": "delivered", "mission_id": mission_id, "ground_station": leg["to"], "sim_t": round(w.sim_t, 2), "deadline_sim_t": m["mission"]["deadline_sim_t"], "result": m.get("result"), "total_paid_usd": m.get("total_paid_usd")})
-                        w.narrate("delivered", f"Result delivered to {leg['to']} at T+{int(w.sim_t)}s (deadline T+{m['mission']['deadline_sim_t']}s). Audit: grants, receipts and attestations recorded.", mission_id)
+                        self._set(m, "DELIVERED", delivered_sim_t=m["delivered_sim_t"], fidelity=m.get("fidelity", "full"))
+                        w.emit({"type": "delivered", "mission_id": mission_id, "ground_station": leg["to"], "sim_t": round(w.sim_t, 2), "deadline_sim_t": m["mission"]["deadline_sim_t"], "result": m.get("result"), "total_paid_usd": m.get("total_paid_usd"), "fidelity": m.get("fidelity", "full")})
+                        w.narrate("delivered", f"{'Full-fidelity analysis' if m.get('fidelity', 'full') == 'full' else 'Low-fidelity crop'} delivered to {leg['to']} at T+{int(w.sim_t)}s (deadline T+{m['mission']['deadline_sim_t']}s). Audit: grants, receipts and attestations recorded.", mission_id)
                         return
                 elif leg["kind"] == "compute":
                     if not grant:

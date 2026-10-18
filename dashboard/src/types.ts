@@ -97,6 +97,8 @@ export interface Plan {
   feasible: boolean
   reasons?: string[]
   chosen?: boolean
+  fidelity?: 'full' | 'low'
+  tradeoff?: string
 }
 
 export type MissionStatus =

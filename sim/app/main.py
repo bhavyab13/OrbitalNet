@@ -105,14 +105,16 @@ def scene_hotspots():
 # ---------- planner
 @app.post("/plan")
 def plan(req: dict[str, Any]):
-    m = world.sc["mission"]
+    mid = req.get("mission_id") or world.sc["mission"]["mission_id"]
+    ms = world.missions.get(mid)
+    # defaults come from the running mission (which may carry judge/buyer overrides), else the scenario
+    m = (ms or {}).get("mission") or world.sc["mission"]
     req = {**{"mission_id": m["mission_id"], "source_node": m["source_node"], "payload_mb": m["payload_mb"], "op": m["op"], "model": m["model"],
-              "result_mb_estimate": m["result_mb_estimate"], "deadline_sim_t": m["deadline_sim_t"], "budget_usd": m["budget_usd"]}, **req}
+              "result_mb_estimate": m["result_mb_estimate"], "deadline_sim_t": m["deadline_sim_t"], "budget_usd": m["budget_usd"],
+              "degraded": m.get("degraded"), "required_fidelity": m.get("required_fidelity", "any")}, **req}
     if req.get("now_sim_t") is None:
         req["now_sim_t"] = world.sim_t
     # a running mission with committed state → replan from there unless caller overrides
-    mid = req.get("mission_id")
-    ms = world.missions.get(mid)
     if ms and ms.get("committed") and "committed" not in req:
         req["committed"] = ms["committed"]
     if ms and "budget_usd" not in req:
@@ -298,6 +300,15 @@ async def disrupt(body: dict[str, Any]):
         ev = {"type": "provider_online", "node_id": node, "operator_id": world.nodes[node]["operator_id"], "launched_process": launched}
         world.emit(ev)
         world.narrate("disruption", body.get("label") or f"New provider {world.nodes[node].get('operator_name')} ({node}) is coming online and registering its manifest.")
+        return {"ok": True, "event": ev}
+    if t == "misbehave":
+        node = body["node_id"]
+        op = world.nodes[node]["operator_id"]
+        mode = body.get("mode", "over_attest")
+        res = await _op_post(op, "/admin/misbehave", {"mode": mode, "label": body.get("label")}, admin=True)
+        ev = {"type": "misbehave", "node_id": node, "operator_id": op, "mode": mode, "operator_response": res}
+        world.emit(ev)
+        world.narrate("disruption", body.get("label") or f"The judge made {world.nodes[node].get('operator_name', op)} over-report its usage. Watch reconciliation.")
         return {"ok": True, "event": ev}
     if t == "revoke":
         node = body["node_id"]

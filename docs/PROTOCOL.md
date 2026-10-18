@@ -105,6 +105,9 @@ The attestation + receipt + grant form the **audit triple**: *what was paid, wha
 
 ### 2.8 Refund Voucher (Provider → Buyer) — issued when a paid grant becomes unfulfillable because of the provider's side (link outage, capacity revoked). Signed credit redeemable at that provider. (In this implementation: ledger credit + event; real money movement would use Stripe refunds when the Stripe rail is active.)
 
+### 2.9 Reconciliation (the audit triple, checked)
+For every grant: the MPP **receipt** proves what was paid; the **grant** proves what was authorised; the **attestation** (or refund voucher) proves what was done. Reconciliation verifies all three against the provider's manifest key and against each other: receipt present and referenced by the attestation; grant and attestation signatures valid; same `grant_id`/`node_id`; attested `compute_s`, `input_bytes`, `output_bytes` within the grant's limits (+10% framing); price within the quote; refund voucher amount equals the grant price. A provider whose attestation exceeds its own grant is flagged and marked **untrusted** in the registry; the broker will not route to it again until an operator clears it. The signature alone cannot catch this — only the three-way check can. (Broker tool `reconcile_mission`; `GET /reconcile/{mission_id}`.)
+
 ## 3. Plans and conditional commitment
 
 A **Plan** is an ordered list of legs, each `{node_from, node_to, window_id, grant?}` or `{node, op, window_id, grant?}`. The broker's planner only returns plans that are *physically* feasible (bytes fit windows, compute fits window, finish ≤ deadline) and *economically* feasible (Σ quotes ≤ budget). The buyer chooses among feasible plans (the LLM's job: trade latency vs cost vs output fidelity).

@@ -28,9 +28,10 @@ Feasibility is decided by the real planner (`sim/app/planner.py`), unchanged.
 
 ## Metrics
 - **completion**: delivered before the deadline (95% bootstrap CI).
-- **wasted $/mission**: money paid for grants never fulfilled and never refunded.
-- **stranded/mission**: count of such grants.
-- **rejected ops**: operations the provider's policy layer refused (an agent trying a dead link). Always 0 for OCGP because the world assertion makes the dead link visible before any attempt.
+- **wasted $/mission**: money paid for grants never fulfilled and never refunded (absolute; small because of the $0.50 relay floor).
+- **wasted % of spend**: the same money as a share of everything the strategy paid in that cell (`Σwasted / Σpaid`). This is the number to read: it is what fraction of the buyer's budget bought nothing.
+- **stranded /100 missions**: paid grants that could never be used, per 100 missions.
+- **rejected ops /100 missions**: operations the provider's policy layer refused (an agent trying a dead link), per 100 missions. Always 0 for OCGP because the world assertion makes the dead link visible before any attempt.
 - **replan latency**: sim-seconds from a failure to the next commit (includes waiting for a late provider).
 
 ## What this does and does not show

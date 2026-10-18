@@ -12,7 +12,8 @@ def _req(**over):
     m = SC["mission"]
     r = {"mission_id": m["mission_id"], "source_node": m["source_node"], "payload_mb": m["payload_mb"], "op": m["op"],
          "model": m["model"], "result_mb_estimate": m["result_mb_estimate"], "deadline_sim_t": m["deadline_sim_t"],
-         "budget_usd": m["budget_usd"], "now_sim_t": 0, "quotes": []}
+         "budget_usd": m["budget_usd"], "now_sim_t": 0, "quotes": [],
+         "degraded": m.get("degraded"), "required_fidelity": m.get("required_fidelity", "any")}
     r.update(over)
     return r
 
@@ -40,7 +41,7 @@ def test_own_downlink_infeasible_by_deadline():
 
 
 def test_raw_relay_infeasible_on_bytes():
-    raw = [p for p in by_strategy(_run(offline={"STARLINK-3005"}), "raw-relay") if "EDRS-C" in p["label"]]
+    raw = [p for p in by_strategy(_run(offline={"STARLINK-3005"}), "raw-relay") if "EDRS-C" in p["label"] and p["label"].startswith("Raw relay")]
     assert raw
     p = raw[0]
     assert not p["feasible"]
@@ -49,8 +50,7 @@ def test_raw_relay_infeasible_on_bytes():
 
 def test_compute_relay_feasible_and_cheap():
     plans = _run(offline={"STARLINK-3005"})
-    best = plans[0]
-    assert best["feasible"] and best["strategy"] == "compute+relay"
+    best = next(p for p in plans if p["strategy"] == "compute+relay" and p["feasible"])
     assert "PHISAT-2" in best["label"] and "EDRS-C" in best["label"]
     assert 300 <= best["delivery_sim_t"] <= 360
     assert abs(best["cost_usd"] - 2.45) < 0.05, best["cost_usd"]
@@ -62,7 +62,7 @@ def test_compute_relay_feasible_and_cheap():
 def test_quotes_override_estimates():
     quotes = [{"quote_id": "q1", "node_id": "PHISAT-2", "window_id": "w_A_B_1", "price_usd": 1.90},
               {"quote_id": "q2", "node_id": "EDRS-C", "window_id": "w_C_GS_1", "price_usd": 0.55}]
-    best = _run(offline={"STARLINK-3005"}, quotes=quotes)[0]
+    best = next(p for p in _run(offline={"STARLINK-3005"}, quotes=quotes) if p["strategy"] == "compute+relay" and p["feasible"])
     assert best["quoted"] and abs(best["cost_usd"] - 2.45) < 1e-6
     assert {l["quote_id"] for l in best["legs"] if l["quote_id"]} == {"q1", "q2"}
 
@@ -82,3 +82,35 @@ def test_replan_infeasible_when_d_offline():
     plans = _run(statuses={"w_C_GS_1": "killed"}, now_sim_t=280, committed={"node_id": "PHISAT-2", "result_mb": 0.04}, offline={"STARLINK-3005"})
     assert not any(p["feasible"] for p in plans)
     assert any("offline" in r for p in plans for r in p["reasons"])
+
+
+def _feasible(plans):
+    return [p for p in plans if p["feasible"]]
+
+
+def test_deadline_720_two_feasible_with_tradeoffs():
+    plans = _run(offline={"STARLINK-3005"})
+    feas = _feasible(plans)
+    assert len(feas) == 2, [(p["label"], p["reasons"]) for p in plans]
+    fast = next(p for p in feas if p["fidelity"] == "full")
+    low = next(p for p in feas if p["fidelity"] == "low")
+    assert fast["strategy"] == "compute+relay" and "EDRS-C" in fast["label"]
+    assert low["label"].startswith("Low-fidelity raw crop (40 MB)") and "EDRS-C" in low["label"]
+    assert abs(low["cost_usd"] - 0.80) < 0.01 and 300 <= low["delivery_sim_t"] <= 330
+    assert "fastest" in fast["tradeoff"] and "full fidelity" in fast["tradeoff"]
+    assert "cheapest" in low["tradeoff"] and "low fidelity" in low["tradeoff"]
+
+
+def test_deadline_1200_three_feasible_including_late_full():
+    feas = _feasible(_run(offline={"STARLINK-3005"}, deadline_sim_t=1200))
+    assert len(feas) == 3, [p["label"] for p in feas]
+    late = next(p for p in feas if "GS-SINGAPORE" in p["label"])
+    assert late["fidelity"] == "full" and 900 <= late["delivery_sim_t"] <= 960
+    assert "cheapest full fidelity" in late["tradeoff"] and "late" in late["tradeoff"]
+
+
+def test_required_full_fidelity_excludes_low():
+    plans = _run(offline={"STARLINK-3005"}, required_fidelity="full")
+    low = [p for p in plans if p["fidelity"] == "low"]
+    assert low and all(not p["feasible"] and "requires full fidelity" in " ".join(p["reasons"]) for p in low)
+    assert len(_feasible(plans)) == 1

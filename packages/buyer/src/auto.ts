@@ -15,7 +15,7 @@ export function choosePlan(plans: Plan[], budget: number): Plan | undefined {
 }
 
 export function planTable(plans: Plan[]): string {
-  return plans.map((p) => `  ${p.feasible ? "✓" : "✗"} ${p.label.padEnd(34)} T+${String(p.delivery_sim_t ?? "—").padStart(5)}s  $${(p.cost_usd ?? 0).toFixed(2)}  ${p.feasible ? "" : (p.reasons ?? []).join("; ")}`).join("\n");
+  return plans.map((p: any) => `  ${p.feasible ? "✓" : "✗"} ${String(p.fidelity ?? "full").padEnd(4)} ${p.label.padEnd(58)} T+${String(Math.round(p.delivery_sim_t ?? 0) || "—").padStart(5)}s  $${(p.cost_usd ?? 0).toFixed(2)}  ${p.feasible ? (p.tradeoff ?? "") : (p.reasons ?? []).join("; ")}`).join("\n");
 }
 
 export async function runAuto(broker: Broker, mission: any) {
@@ -89,7 +89,11 @@ export async function runAuto(broker: Broker, mission: any) {
       await sleep(2000);
       status = await broker.call("get_mission_status", { mission_id });
       const s = status.status ?? status.mission?.status;
-      if (s === "DELIVERED") { await narrate(`Delivered at T+${status.delivered_sim_t ?? status.mission?.delivered_sim_t ?? "?"}s. Audit: ${status.audit?.length ?? 0} entries.`, "delivered"); return status; }
+      if (s === "DELIVERED") {
+        const find = (o: any, k: string): any => { if (!o || typeof o !== "object") return undefined; if (k in o && o[k] != null) return o[k]; for (const v of Object.values(o)) { const r = find(v, k); if (r !== undefined) return r; } return undefined; };
+        const t = find(status, "delivered_sim_t"); const paid = find(status, "total_paid_usd");
+        await narrate(`Delivered at T+${t !== undefined ? Math.round(Number(t)) : "?"}s (deadline T+${mission.deadline_sim_t}s), total paid $${Number(paid ?? 0).toFixed(2)}. Audit: ${find(status, "audit")?.length ?? 0} entries.`, "delivered"); return status;
+      }
       if (s === "INFEASIBLE" || s === "FAILED") { await narrate(`Mission ended: ${s}.`, "infeasible"); return status; }
       if (s === "REPLAN_REQUIRED") {
         const refundEntries = status.refunds ?? (status.audit ?? []).filter((a: any) => a.type === "refund" && a.amount_usd);

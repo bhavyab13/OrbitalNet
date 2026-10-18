@@ -3,6 +3,22 @@
 ## The one-sentence claim
 > Agents can now pay for things (MPP). OrbitalNet is the protocol that lets an agent pay for something that **doesn't exist yet, on a machine it can't reach when it uses it, from an owner it has never met** — and still have physics, policy and money all enforced in code.
 
+## Three lines to say unprompted
+- **Generalisation:** "Satellites are the hardest instance of a general problem: the resource is in the future, the machine is offline when you use it, and the owner is a stranger. The same protocol applies to GPU reservations, drone corridors and edge cameras."
+- **Who signs physics:** "In the simulation the world key signs time and window state. On a real spacecraft that is onboard ephemeris plus GNSS time; the protocol only needs *some* signer the provider trusts for physics."
+- **Security posture:** "No auth on the broker and open judge tools are demo choices. The security claim is narrower and real: grants are single-use, scoped, and verified by the provider's own key, offline."
+
+## Attach every beat to one word of the novelty claim
+payment-bound · window-bound · offline-verifiable · **conditional** cross-owner commit · **explicit failure semantics** · **self-describing onboarding** — say the word when the beat happens.
+
+## Three missions to show choice (judge can type their own in Claude Desktop)
+| Mission text | Agent should choose | Why |
+|---|---|---|
+| "Responders need a fire-front perimeter in 12 minutes, budget $6" | Inference on PHISAT-2 → EDRS-C relay, full fidelity, ~$2.73, T+300 | urgency + perimeters need full fidelity |
+| "Rough extent of the Papua fires, under $1.50, 12 minutes" | Low-fidelity raw crop via EDRS-C, ~$0.80 | budget language, extent only |
+| "Archive the analysed scene for tomorrow's report, cheapest full-res, 20 minutes" | Inference on PHISAT-2 → its own Singapore pass, ~$2.23, T+900 | not urgent, full fidelity, relaxed deadline |
+CLI: `npm run buyer -- --text "…" --deadline 1200 --budget 1.5`
+
 ## Why this needed agents (say this early)
 Satellite relay and orbital compute already exist (EDRS, Kepler, Φsat-2). What never existed is a **provider-neutral negotiation layer**: each operator has private policy, private capacity, private prices; no central scheduler is trusted with all of it. The buyer must *discover, negotiate, conditionally commit, pay, and recover* across owners in seconds, inside contact windows. That's an agent-to-infrastructure protocol problem, not an orbital-mechanics problem.
 

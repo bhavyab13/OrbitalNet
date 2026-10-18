@@ -154,6 +154,15 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
     const outBytes = Buffer.byteLength(resultJson);
     const powerWh = Number(st.cap.job_power_wh ?? 0);
     st.powerWh = Math.max(0, st.powerWh - powerWh);
+    // Reconciliation fixture: over-report usage once (signature stays valid; only receipt↔grant↔attestation reconciliation catches it).
+    let attInputBytes = Math.max(bytes.byteLength, declaredBytes);
+    let attComputeS = Number(computeS.toFixed(3));
+    if (st.misbehave === "over_attest") {
+      st.misbehave = "none";
+      attComputeS = 3 * Number(grant.limits?.max_compute_s ?? 60);
+      attInputBytes = 2 * Number(grant.limits?.max_input_mb ?? 200) * 1e6;
+      await emit("attestation_overreported", { mission_id: grant.mission_id, grant_id: grant.grant_id, compute_s: attComputeS, input_bytes: attInputBytes });
+    }
     const att = sign(
       {
         attestation_id: newId("a"),
@@ -162,9 +171,9 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
         node_id: cfg.NODE_ID,
         operator_id: cfg.OPERATOR_ID,
         op: grant.op,
-        input_bytes: Math.max(bytes.byteLength, declaredBytes),
+        input_bytes: attInputBytes,
         output_bytes: outBytes,
-        compute_s: Number(computeS.toFixed(3)),
+        compute_s: attComputeS,
         power_wh: powerWh,
         result_sha256: sha256Hex(resultJson),
         sim_t_start: wa.sim_t,
@@ -194,6 +203,12 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
     const rec = st.grants.get(grant.grant_id)!;
     const mb = Math.max(bytes, declaredBytes) / 1e6;
     const durationS = wa.bandwidth_mbps ? (mb * 8) / wa.bandwidth_mbps : 0;
+    let attBytes = Math.max(bytes, declaredBytes);
+    if (st.misbehave === "over_attest") {
+      st.misbehave = "none";
+      attBytes = 2 * Number(grant.limits?.max_payload_mb ?? 1) * 1e6;
+      await emit("attestation_overreported", { mission_id: grant.mission_id, grant_id: grant.grant_id, input_bytes: attBytes });
+    }
     const att = sign(
       {
         attestation_id: newId("a"),
@@ -202,8 +217,8 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
         node_id: cfg.NODE_ID,
         operator_id: cfg.OPERATOR_ID,
         op: "relay",
-        input_bytes: Math.max(bytes, declaredBytes),
-        output_bytes: Math.max(bytes, declaredBytes),
+        input_bytes: attBytes,
+        output_bytes: attBytes,
         compute_s: 0,
         power_wh: 0,
         result_sha256: sha256Hex(payload),
@@ -234,6 +249,13 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
     if (c.req.header("x-admin-token") !== cfg.ADMIN_TOKEN) return c.json({ error: "unauthorized" }, 401);
     await next();
   };
+  app.post("/admin/misbehave", admin, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const mode = body.mode === "over_attest" ? "over_attest" : "none";
+    st.misbehave = mode;
+    await emit("misbehave_armed", { mode, label: body.label ?? null });
+    return c.json({ ok: true, mode });
+  });
   app.post("/admin/reset", admin, async (c) => {
     st = new OperatorState(cfg);
     emit("capacity_changed", { label: "reset" });

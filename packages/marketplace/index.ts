@@ -71,9 +71,9 @@ export const discoverProviders = server.tool({
 }, async ({ capability, include_offline }) => {
   await registry.crawl();
   const providers = registry.list().filter((e) => (include_offline || e.online) && (!capability || e.manifest.capabilities.some((c) => c.type === capability)))
-    .map((e) => ({ operator_id: e.operator_id, operator_name: e.manifest.operator_name, node_id: e.node_id, base_url: e.base_url, verified: e.verified, online: e.online, capabilities: e.manifest.capabilities, policy: e.manifest.policy, payment: e.manifest.payment, capacity: e.manifest.capacity, public_key: e.manifest.public_key, kid: e.manifest.kid }));
+    .map((e) => ({ operator_id: e.operator_id, operator_name: e.manifest.operator_name, node_id: e.node_id, base_url: e.base_url, verified: e.verified, trusted: e.trusted, untrusted_reason: e.untrusted_reason ?? null, online: e.online, capabilities: e.manifest.capabilities, policy: e.manifest.policy, payment: e.manifest.payment, capacity: e.manifest.capacity, public_key: e.manifest.public_key, kid: e.manifest.kid }));
   const data = { providers, count: providers.length };
-  return { content: [{ type: "text", text: providers.length ? providers.map((p) => `${p.operator_id} (${p.node_id}) ${p.verified ? "✓verified" : "✗UNVERIFIED"} caps=${p.capabilities.map((c: any) => c.type).join(",")} @ ${p.base_url}`).join("\n") : "No providers registered yet." }], structuredContent: data };
+  return { content: [{ type: "text", text: providers.length ? providers.map((p) => `${p.operator_id} (${p.node_id}) ${p.verified ? "✓verified" : "✗UNVERIFIED"}${p.trusted ? "" : " ⚠UNTRUSTED(" + p.untrusted_reason + ")"} caps=${p.capabilities.map((c: any) => c.type).join(",")} @ ${p.base_url}`).join("\n") : "No providers registered yet." }], structuredContent: data };
 });
 
 export const getContactWindows = server.tool({
@@ -114,6 +114,8 @@ export const planMission = server.tool({
     now_sim_t: z.number().optional().describe("Override current sim time (default: live)"),
     preserve: z.object({ node_id: z.string(), result_mb: z.number() }).optional().describe("Re-plan from a node that already holds the computed result"),
     exclude_windows: z.array(z.string()).optional().describe("Window ids to avoid (e.g. a killed link)"),
+    required_fidelity: z.enum(["full", "low", "any"]).optional().describe("'full' = on-orbit analysis with fire-front perimeters required; 'low' = a downsampled raw crop is acceptable; 'any' (default) lets the buyer choose by intent"),
+    text: z.string().optional().describe("The mission owner's own words; stored with the mission and shown on the mission-control screen"),
   }),
   outputSchema: z.object({ mission_id: z.string(), now_sim_t: z.number(), deadline_sim_t: z.number(), budget_remaining_usd: z.number(), plans: z.array(Plan), quotes: z.array(Quote), quote_errors: z.array(z.string()) }), annotations: ro,
 }, async (input) => {
@@ -175,6 +177,24 @@ export const injectDisruption = server.tool({
   if (input.type === "launch_provider") setTimeout(() => registry.crawl().catch(() => {}), 2500);
   return { content: [{ type: "text", text: `disruption ${input.type}: ${JSON.stringify(r.event ?? r)}` }], structuredContent: { ok: Boolean(r.ok ?? true), event: r.event ?? r } };
 });
+
+const ReconcileRow = z.object({
+  grant_id: z.string(), operator_id: z.string(), node_id: z.string(), capability: z.string(), window_id: z.string(), price_usd: z.number(),
+  status: z.enum(["fulfilled", "refunded", "unfulfilled"]), receipt_ref: z.string().nullish(), attestation_id: z.string().nullish(),
+  checks: z.record(z.string(), z.boolean().nullable()), details: z.array(z.string()),
+}).passthrough();
+export const reconcileMission = server.tool({
+  name: "reconcile_mission", title: "Reconcile mission",
+  description: "Audit the OCGP triple for a mission: for every paid grant, check the MPP receipt is present, the grant and the provider's usage attestation (or refund voucher) verify against the provider's manifest key, the attestation names the same grant/node/receipt, attested usage is within the grant's limits, and the price is within the quote. Any violation marks the provider untrusted in the registry. Call after DELIVERED (or any time) to prove what was paid == what was authorised == what was done.",
+  inputSchema: z.object({ mission_id: z.string().describe("Mission to reconcile") }),
+  outputSchema: z.object({ ok: z.boolean(), mission_id: z.string(), summary: z.string(), rows: z.array(ReconcileRow), violations: z.array(z.object({ grant_id: z.string(), operator_id: z.string(), check: z.string(), detail: z.string() })) }),
+  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+}, async ({ mission_id }) => {
+  const r = await broker.reconcileMission(mission_id);
+  const text = [`${r.ok ? "OK" : "VIOLATIONS"} — ${r.summary}`, ...r.rows.map((x) => `${x.grant_id} ${x.operator_id}/${x.node_id} ${x.capability} ${x.window_id} $${x.price_usd.toFixed(2)} [${x.status}] ${Object.entries(x.checks).map(([k, v]) => `${k}=${v === null ? "n/a" : v ? "✓" : "✗"}`).join(" ")}${x.details.length ? " — " + x.details.join("; ") : ""}`)].join("\n");
+  return { content: [{ type: "text", text }], structuredContent: r };
+});
+server.get("/reconcile/:mission_id", async (c) => c.json(await broker.reconcileMission(c.req.param("mission_id"))));
 
 export const resetWorld = server.tool({
   name: "reset_world", title: "Reset world",

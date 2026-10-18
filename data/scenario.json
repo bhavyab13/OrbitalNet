@@ -28,7 +28,15 @@
       "image_file": "data/papua_VIIRS_SNPP_CorrectedReflectance_BandsM11-I2-I1.jpg",
       "truecolor_file": "data/papua_VIIRS_SNPP_CorrectedReflectance_TrueColor.jpg",
       "truth_csv": "data/viirs_24h.csv"
-    }
+    },
+    "fidelity": "full",
+    "degraded": {
+      "label": "downsampled crop",
+      "payload_mb": 40,
+      "fidelity": "low",
+      "note": "8x downsampled false-colour crop; fire extent only, no per-front perimeter"
+    },
+    "required_fidelity": "any"
   },
   "nodes": [
     {
@@ -247,28 +255,35 @@
       "label": "Lumen Relay revokes unfulfilled grants",
       "type": "revoke",
       "node_id": "EDRS-C"
+    },
+    {
+      "id": "over_attest_b",
+      "label": "Orbital Foundry over-reports compute usage",
+      "type": "misbehave",
+      "node_id": "PHISAT-2",
+      "mode": "over_attest",
+      "hint": "Press before compute runs. Reconcile flags the attestation; receipt\u2194grant\u2194attestation disagree."
     }
   ],
   "expected_story": {
-    "plan_own_downlink": {
-      "delivery_sim_t": 1620,
-      "cost": 0,
-      "feasible": false,
-      "reason": "after deadline"
+    "deadline_720": {
+      "feasible": [
+        "Inference on PHISAT-2 \u2192 relay EDRS-C \u2192 GS-PUNTA-ARENAS (full, ~$2.45 est / ~$2.73 quoted, T+300)",
+        "Low-fidelity raw crop (40 MB) via EDRS-C \u2192 GS-PUNTA-ARENAS (low, ~$0.80, T+306)"
+      ],
+      "infeasible": {
+        "own_downlink": "T+1620 after deadline",
+        "raw_relay_full": "180 MB does not fit w_A_C_1 (125 MB in 40 s at 25 Mbps)",
+        "inference_then_B_own_downlink": "T+900 after deadline"
+      }
     },
-    "plan_raw_relay_C": {
-      "feasible": false,
-      "reason": "180 MB does not fit w_A_C_1 (125 MB in 40 s at 25 Mbps)"
-    },
-    "plan_compute_B_relay_C": {
-      "delivery_sim_t": 312,
-      "cost": "~$2.45",
-      "feasible": true
+    "deadline_1200": {
+      "feasible_extra": "Inference on PHISAT-2 \u2192 GS-SINGAPORE (full, ~$1.95 est / ~$2.23 quoted, T+900) \u2014 cheapest full fidelity, late"
     },
     "after_kill_c": {
       "replan": "PHISAT-2 -> STARLINK-3005 -> GS-OREGON",
       "delivery_sim_t": 436,
-      "requires": "provider D online"
+      "requires": "provider D online; no feasible path before that"
     }
   }
 }

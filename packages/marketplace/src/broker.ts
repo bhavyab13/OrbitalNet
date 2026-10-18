@@ -59,7 +59,7 @@ export function explain(p: Plan, deadline: number, budget: number): string {
 }
 
 /** Full planning pass: candidate legs → quotes from each provider → priced plans. */
-export async function planMission(input: { mission_id: string; source_node?: string; payload_mb?: number; op?: string; model?: string; result_mb_estimate?: number; deadline_sim_t?: number; budget_usd?: number; now_sim_t?: number; preserve?: { node_id: string; result_mb: number }; exclude_windows?: string[]; }) {
+export async function planMission(input: { mission_id: string; source_node?: string; payload_mb?: number; op?: string; model?: string; result_mb_estimate?: number; deadline_sim_t?: number; budget_usd?: number; now_sim_t?: number; preserve?: { node_id: string; result_mb: number }; exclude_windows?: string[]; required_fidelity?: string; text?: string; }) {
   const ms = state(input.mission_id);
   const m = ms.mission;
   const spent = ms.payments.reduce((a, p) => a + p.amount_usd, 0);
@@ -71,15 +71,16 @@ export async function planMission(input: { mission_id: string; source_node?: str
     result_mb_estimate: input.result_mb_estimate ?? m.result_mb_estimate,
     deadline_sim_t: input.deadline_sim_t ?? m.deadline_sim_t, budget_usd: (input.budget_usd ?? m.budget_usd) - spent,
     now_sim_t: now, quotes: [], exclude_windows: input.exclude_windows ?? [], committed: input.preserve,
+    required_fidelity: input.required_fidelity ?? m.required_fidelity ?? "any", degraded: m.degraded, text: input.text ?? m.text,
   };
-  Object.assign(m, { source_node: req.source_node, deadline_sim_t: req.deadline_sim_t, budget_usd: input.budget_usd ?? m.budget_usd });
+  Object.assign(m, { source_node: req.source_node, deadline_sim_t: req.deadline_sim_t, budget_usd: input.budget_usd ?? m.budget_usd, required_fidelity: req.required_fidelity, text: req.text });
   emit({ type: "narration", act: "plan", text: `Broker: planning ${input.mission_id} from ${req.source_node} (${req.payload_mb} MB, deadline T+${req.deadline_sim_t}s, budget $${req.budget_usd.toFixed(2)})` });
   const draft = await simFetch("/plan", { method: "POST", json: req });
   // Collect every (provider, capability, window, units) a candidate plan needs; dedupe.
   const need = new Map<string, { entry: registry.Entry; capability: string; window_id: string; units: Record<string, number> }>();
   for (const p of draft.plans ?? []) for (const leg of p.legs ?? []) {
     const t = chargeTarget(leg); if (!t) continue;
-    const k = `${t.entry.operator_id}|${t.capability}|${leg.window_id}`;
+    const k = `${t.entry.operator_id}|${t.capability}|${leg.window_id}|${JSON.stringify(t.units)}`; // units matter: a 40 MB crop and a 180 MB raw relay get separate quotes
     if (!need.has(k)) need.set(k, { entry: t.entry, capability: t.capability, window_id: leg.window_id, units: t.units });
   }
   const quoteErrors: string[] = [];
@@ -144,4 +145,74 @@ export function grantsForPlan(mission_id: string, plan_id: string): Record<strin
   const ms = state(mission_id); const out: Record<string, Grant> = {};
   for (const [k, g] of Object.entries(ms.grants)) if (k.startsWith(plan_id + ":")) out[k.split(":")[1]] = g;
   return out;
+}
+
+
+// ---------------- Reconciliation (PROTOCOL §2.9): receipt ↔ grant ↔ attestation ----------------
+export type ReconcileRow = {
+  grant_id: string; operator_id: string; node_id: string; capability: string; window_id: string; price_usd: number;
+  status: "fulfilled" | "refunded" | "unfulfilled"; receipt_ref?: string | null; attestation_id?: string | null;
+  checks: Record<string, boolean | null>; details: string[];
+};
+export type ReconcileResult = { ok: boolean; mission_id: string; summary: string; rows: ReconcileRow[]; violations: Array<{ grant_id: string; operator_id: string; check: string; detail: string }> };
+
+function walkAttestations(obj: any, out: any[], seen = new Set<any>()) {
+  if (!obj || typeof obj !== "object" || seen.has(obj)) return; seen.add(obj);
+  if (Array.isArray(obj)) { for (const x of obj) walkAttestations(x, out, seen); return; }
+  if (typeof obj.attestation_id === "string" && typeof obj.grant_id === "string" && typeof obj.sig === "string") { out.push(obj); return; }
+  for (const k of Object.keys(obj)) walkAttestations(obj[k], out, seen);
+}
+
+export async function reconcileMission(mission_id: string): Promise<ReconcileResult> {
+  const ms = state(mission_id);
+  const sim = await simFetch(`/missions/${mission_id}`).catch(() => null);
+  const attestations: any[] = []; walkAttestations(sim ? { legs: sim.legs, previous_plans: sim.previous_plans, result: null } : null, attestations);
+  const audit: any[] = sim?.audit ?? [];
+  const vouchers: any[] = audit.filter((a) => a.type === "refund" && a.voucher?.voucher?.sig).map((a) => a.voucher.voucher);
+  const rows: ReconcileRow[] = []; const violations: ReconcileResult["violations"] = [];
+  const grants = Object.values(ms.grants);
+  for (const g of grants as any[]) {
+    const entry = registry.byOperator(g.operator_id); const key = entry?.manifest.public_key;
+    const quote = ms.quotes[g.quote_id] ?? Object.values(ms.quotes).find((q: any) => q.window_id === g.window_id && q.operator_id === g.operator_id);
+    const att = attestations.find((a) => a.grant_id === g.grant_id);
+    const voucher = vouchers.find((v) => v.grant_id === g.grant_id);
+    const status: ReconcileRow["status"] = att ? "fulfilled" : voucher ? "refunded" : "unfulfilled";
+    const checks: Record<string, boolean | null> = {}; const details: string[] = [];
+    const fail = (check: string, detail: string) => { checks[check] = false; details.push(detail); violations.push({ grant_id: g.grant_id, operator_id: g.operator_id, check, detail }); };
+    checks.receipt_present = Boolean(g.payment?.receipt && g.payment?.receipt_ref); if (!checks.receipt_present) fail("receipt_present", "grant carries no payment receipt");
+    checks.grant_sig_valid = key ? await verify(g, key) : null; if (checks.grant_sig_valid === false) fail("grant_sig_valid", "grant signature does not verify against the provider manifest key");
+    checks.price_within_quote = quote ? Number(g.price_usd) <= Number((quote as any).price_usd) + 0.005 : null;
+    if (checks.price_within_quote === false) fail("price_within_quote", `grant price $${g.price_usd} exceeds quote $${(quote as any).price_usd}`);
+    if (status === "fulfilled") {
+      checks.attestation_present = true;
+      checks.attestation_sig_valid = key ? await verify(att, key) : null; if (checks.attestation_sig_valid === false) fail("attestation_sig_valid", "attestation signature does not verify");
+      checks.attestation_matches_grant = att.grant_id === g.grant_id && att.node_id === g.node_id && (!att.receipt_ref || att.receipt_ref === g.payment?.receipt_ref);
+      if (!checks.attestation_matches_grant) fail("attestation_matches_grant", `attestation names ${att.node_id}/${att.grant_id}/${att.receipt_ref}, grant is ${g.node_id}/${g.grant_id}/${g.payment?.receipt_ref}`);
+      const lim = g.limits ?? {}; let within = true;
+      const over = (what: string, used: number, allowed: number, unit: string) => { within = false; fail("usage_within_limits", `${g.operator_id} attested ${what} ${used}${unit} but the grant allowed ${allowed}${unit}`); };
+      if (lim.max_compute_s !== undefined && Number(att.compute_s) > Number(lim.max_compute_s)) over("compute", Number(att.compute_s), Number(lim.max_compute_s), " s");
+      if (lim.max_input_mb !== undefined && Number(att.input_bytes) > Number(lim.max_input_mb) * 1e6 * 1.1 + 8192) over("input", Math.round(Number(att.input_bytes) / 1e6), Number(lim.max_input_mb), " MB");
+      if (lim.max_payload_mb !== undefined && Number(att.input_bytes) > Number(lim.max_payload_mb) * 1e6 * 1.1 + 8192) over("payload", Number((Number(att.input_bytes) / 1e6).toFixed(3)), Number(lim.max_payload_mb), " MB");
+      if (lim.max_output_mb !== undefined && Number(att.output_bytes) > Number(lim.max_output_mb) * 1e6 * 1.1 + 8192) over("output", Number((Number(att.output_bytes) / 1e6).toFixed(3)), Number(lim.max_output_mb), " MB");
+      checks.usage_within_limits = within;
+    } else if (status === "refunded") {
+      checks.refund_voucher_valid = key ? (await verify(voucher, key)) && Math.abs(Number(voucher.amount_usd) - Number(g.price_usd)) < 0.005 : null;
+      if (checks.refund_voucher_valid === false) fail("refund_voucher_valid", `refund voucher invalid or amount $${voucher.amount_usd} != grant $${g.price_usd}`);
+    } else {
+      checks.attestation_present = null; // not yet fulfilled: nothing to reconcile
+    }
+    rows.push({ grant_id: g.grant_id, operator_id: g.operator_id, node_id: g.node_id, capability: g.capability, window_id: g.window_id, price_usd: Number(g.price_usd), status, receipt_ref: g.payment?.receipt_ref ?? null, attestation_id: att?.attestation_id ?? null, checks, details });
+  }
+  const nF = rows.filter((r) => r.status === "fulfilled").length, nR = rows.filter((r) => r.status === "refunded").length;
+  const summary = `${rows.length} grants, ${nF} fulfilled, ${nR} refunded, ${violations.length} violations`;
+  const ok = violations.length === 0;
+  for (const v of violations) {
+    const e = registry.byOperator(v.operator_id);
+    registry.markUntrusted(v.operator_id, `${v.check}: ${v.detail}`);
+    emit({ type: "reconcile_violation", mission_id, operator_id: v.operator_id, node_id: e?.node_id, grant_id: v.grant_id, check: v.check, detail: v.detail });
+    emit({ type: "narration", act: "reconcile", text: `Reconciliation: ${e?.manifest.operator_name ?? v.operator_id} — ${v.detail} — flagged, provider marked untrusted` });
+  }
+  if (ok && rows.length) emit({ type: "narration", act: "reconcile", text: `Reconciliation: every receipt matches a grant matches an attestation (${nF + nR}/${rows.length})` });
+  emit({ type: "reconcile_result", mission_id, ok, summary, rows: rows.map((r) => ({ grant_id: r.grant_id, operator_id: r.operator_id, status: r.status, ok: r.details.length === 0 })) });
+  return { ok, mission_id, summary, rows, violations };
 }

@@ -14,7 +14,7 @@ You buy orbital compute and relay capacity from independently operated satellite
 
 How to work:
 1. discover_providers → get_contact_windows → plan_mission (the planner only marks plans feasible if bytes fit the contact windows, compute fits, delivery is before the deadline and cost is within budget; trust it).
-2. Choose among FEASIBLE plans. Prefer earliest delivery; break ties on cost. Explain the choice in one or two sentences, citing why the alternatives failed (deadline, bytes, budget).
+2. Choose among FEASIBLE plans by reading the mission's INTENT, not by a fixed rule. Plans differ in delivery time, cost and fidelity ("full" = on-orbit analysis with fire-front perimeters; "low" = a downsampled raw crop, extent only). Urgent responder language ("perimeter", "fire fronts", "now", "crews") → pay for speed and full fidelity. Budget language ("under $X", "cheapest", "rough extent is fine") → the cheap low-fidelity crop if it meets the deadline. Archival or next-day language → the cheapest full-fidelity plan even if it is late, provided the deadline allows. If a required fidelity is stated, never violate it. Explain the choice in two sentences: what the mission needs, which plan serves it, and what you rejected and why (cost, fidelity, lateness, or infeasibility).
 3. reserve_path for the chosen plan (this pays each provider with MPP and collects signed grants). If it fails, no money moved: replan.
 4. submit_mission, then wait_for_mission_event. On REPLAN_REQUIRED: the state tells you which work is already committed and what was refunded; run plan_mission again with preserve set and only buy the remaining legs. On DELIVERED or INFEASIBLE: stop.
 5. If NO plan is feasible but the deadline has not passed, do not give up: call wait_for_new_provider (providers can join the marketplace at any time with self-describing signed manifests), then plan_mission again. Declare INFEASIBLE only when the deadline passes.
@@ -72,6 +72,7 @@ export async function runLLM(broker: Broker, mission: any) {
     content: `New mission ${mission_id}.\n${mission.text}\nParameters: ${JSON.stringify({
       source_node: mission.source_node, payload_mb: mission.payload_mb, op: mission.op, model: mission.model,
       result_mb_estimate: mission.result_mb_estimate, deadline_sim_t: mission.deadline_sim_t, budget_usd: mission.budget_usd, holder: mission.buyer_id,
+      required_fidelity: mission.required_fidelity ?? "any", degraded_option: mission.degraded,
     })}\nProcure a deadline-feasible path, execute it, and see it through to delivery.`,
   }];
   await narrate(`Mission ${mission_id} received. Reading provider manifests…`, "arrival");

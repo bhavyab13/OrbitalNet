@@ -76,6 +76,9 @@ class Plan:
     quoted: bool
     reasons: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    fidelity: str = "full"      # full | low
+    tradeoff: str = ""          # short human summary relative to the other feasible plans
+    payload_mb: float = 0.0     # bytes leaving the source node (modeled)
 
     def to_dict(self) -> dict:
         return {
@@ -83,6 +86,7 @@ class Plan:
             "legs": [l.to_dict() for l in self.legs],
             "delivery_sim_t": round(self.delivery_sim_t, 2), "cost_usd": round(self.cost_usd, 4),
             "feasible": self.feasible, "quoted": self.quoted, "reasons": self.reasons, "notes": self.notes,
+            "fidelity": self.fidelity, "tradeoff": self.tradeoff, "payload_mb": round(self.payload_mb, 3),
         }
 
 
@@ -138,18 +142,38 @@ def plan(req: dict, windows: list[WindowView], nodes: dict[str, dict], gs: set[s
     op = req.get("op")
     model = req.get("model")
     result_mb = float(req.get("result_mb_estimate") or 0.05)
-    quotes = {}
+    # Quotes are keyed by (node, window) and matched on the quoted units too, so a 40 MB crop and a
+    # 180 MB raw relay over the same window keep their own prices.
+    quotes_by_key: dict = {}
     for q in req.get("quotes") or []:
-        quotes[(q.get("node_id"), q.get("window_id"))] = q
+        quotes_by_key.setdefault((q.get("node_id"), q.get("window_id")), []).append(q)
 
+    def find_quote(node_id, window_id, mb=None, compute_s=None):
+        cands = quotes_by_key.get((node_id, window_id)) or []
+        if not cands:
+            return None
+        def ok(q):
+            u = q.get("units") or {}
+            if mb is not None and u.get("mb") is not None and abs(float(u["mb"]) - float(mb)) > 0.1 * max(float(mb), 1e-6) + 0.01:
+                return False
+            if compute_s is not None and u.get("compute_s") is not None and abs(float(u["compute_s"]) - float(compute_s)) > 0.25 * max(float(compute_s), 1.0):
+                return False
+            return True
+        matched = [q for q in cands if ok(q)]
+        return matched[0] if matched else None
+
+    degraded = req.get("degraded") or None
+    required_fidelity = str(req.get("required_fidelity") or "any")
     if committed:
         start_node = committed["node_id"]
         payload0 = float(committed.get("result_mb", result_mb))
         need_compute = False
+        committed_fidelity = str(committed.get("fidelity") or "full")
     else:
         start_node = req["source_node"]
         payload0 = float(req["payload_mb"])
         need_compute = bool(op)
+        committed_fidelity = "full"
 
     usable = [w for w in windows if w.window_id not in exclude]
     plans: list[Plan] = []
@@ -162,17 +186,30 @@ def plan(req: dict, windows: list[WindowView], nodes: dict[str, dict], gs: set[s
                 n = nodes.get(w.to)
                 if n and (_cap(n) or {}).get("type") == "compute" and model in (_cap(n).get("models") or [model]):
                     compute_opts.append(w.to)
-        for compute_at in compute_opts:
+        variants: list[tuple[str | None, str, float]] = [(c, committed_fidelity, payload0) for c in compute_opts]
+        # Degraded product: a downsampled crop of the raw scene, delivered without on-orbit analysis.
+        # Only meaningful for raw routes that leave the source (no compute), before anything is committed.
+        if degraded and not committed and len(route) > 1:
+            variants.append((None, "low", float(degraded.get("payload_mb", payload0))))
+        for compute_at, fidelity, payload_start in variants:
             legs: list[Leg] = []
             reasons: list[str] = []
             notes: list[str] = []
             t = now
-            payload = payload0
+            payload = payload_start
             quoted = True
             cost = 0.0
-            if need_compute and compute_at is None and not committed:
+            if fidelity == "low":
+                notes.append(f"{degraded.get('label', 'degraded product')}: {degraded.get('note', '')}".strip(": "))
+                if required_fidelity == "full":
+                    reasons.append("mission requires full fidelity")
+            elif need_compute and compute_at is None and not committed:
                 # raw relay / own downlink of the full scene: result produced on the ground
                 notes.append("raw scene delivered; analysis happens on the ground")
+            # Intermediate nodes must offer relay capacity unless they are the compute node (which forwards its own result).
+            # Such routes are structurally impossible (not a tradeoff), so they are pruned rather than listed.
+            if any(w.to != compute_at and ((_cap(nodes.get(w.to)) or {}).get("type") if nodes.get(w.to) else None) != "relay" for w in route[:-1]):
+                continue
             for w in route:
                 if w.status == "killed":
                     reasons.append(f"link {w.window_id} ({w.frm}→{w.to}) is down")
@@ -196,7 +233,7 @@ def plan(req: dict, windows: list[WindowView], nodes: dict[str, dict], gs: set[s
                 # relay downlink pricing
                 from_node = nodes.get(w.frm)
                 if w.to in gs and from_node and (_cap(from_node) or {}).get("type") == "relay":
-                    q = quotes.get((w.frm, w.window_id))
+                    q = find_quote(w.frm, w.window_id, mb=payload)
                     leg.operator_id = from_node.get("operator_id")
                     if q:
                         leg.price_usd = float(q["price_usd"]); leg.quote_id = q.get("quote_id")
@@ -213,7 +250,7 @@ def plan(req: dict, windows: list[WindowView], nodes: dict[str, dict], gs: set[s
                         reasons.append(f"{w.to} max input {cap.get('max_input_mb')} MB < {payload:.0f} MB")
                     cleg = Leg(kind="compute", window_id=w.window_id, start=t, end=t + cs, bytes_mb=payload, duration_s=cs,
                                node=w.to, op=op, model=model, operator_id=n.get("operator_id"))
-                    q = quotes.get((w.to, w.window_id))
+                    q = find_quote(w.to, w.window_id, compute_s=cs)
                     if q:
                         cleg.price_usd = float(q["price_usd"]); cleg.quote_id = q.get("quote_id")
                     else:
@@ -238,15 +275,44 @@ def plan(req: dict, windows: list[WindowView], nodes: dict[str, dict], gs: set[s
             elif len(route) == 1 and start_node == req.get("source_node") and not committed:
                 strategy = "own-downlink"
                 label = f"Own downlink {hops[0]} → {hops[-1]}"
+            elif fidelity == "low":
+                strategy = "raw-relay"
+                label = f"Low-fidelity raw crop ({payload_start:.0f} MB) via " + " → ".join(hops[1:-1]) + f" → {hops[-1]}"
             else:
                 strategy = "raw-relay" if not committed else "relay"
                 label = ("Raw relay via " if not committed else "Relay via ") + " → ".join(hops[1:-1]) + f" → {hops[-1]}" if len(hops) > 2 else f"Direct {hops[0]} → {hops[-1]}"
-            pid = "p_" + hashlib.sha1(("|".join(w.window_id for w in route) + f"|{compute_at}").encode()).hexdigest()[:8]
+            pid = "p_" + hashlib.sha1(("|".join(w.window_id for w in route) + f"|{compute_at}|{fidelity}").encode()).hexdigest()[:8]
             reasons = list(dict.fromkeys(reasons))  # dedupe, keep order
-            plans.append(Plan(pid, label, strategy, legs, delivery, cost, feasible=not reasons, quoted=quoted, reasons=reasons, notes=notes))
+            plans.append(Plan(pid, label, strategy, legs, delivery, cost, feasible=not reasons, quoted=quoted, reasons=reasons, notes=notes,
+                              fidelity=fidelity, payload_mb=payload_start))
 
     plans.sort(key=lambda p: (not p.feasible, p.cost_usd if p.feasible else 0, p.delivery_sim_t))
+    _annotate_tradeoffs(plans)
     return [p.to_dict() for p in plans]
+
+
+def _annotate_tradeoffs(plans: list[Plan]) -> None:
+    """Fill `tradeoff` for feasible plans, relative to the other feasible plans (fastest / cheapest / fidelity / delay)."""
+    feas = [p for p in plans if p.feasible]
+    if not feas:
+        return
+    fastest = min(p.delivery_sim_t for p in feas)
+    cheapest = min(p.cost_usd for p in feas)
+    full = [p for p in feas if p.fidelity == "full"]
+    cheapest_full = min((p.cost_usd for p in full), default=None)
+    for p in feas:
+        tags: list[str] = []
+        if abs(p.delivery_sim_t - fastest) < 1e-6:
+            tags.append("fastest")
+        if abs(p.cost_usd - cheapest) < 1e-6:
+            tags.append("cheapest")
+        elif p.fidelity == "full" and cheapest_full is not None and abs(p.cost_usd - cheapest_full) < 1e-6 and len(full) > 1:
+            tags.append("cheapest full fidelity")
+        tags.append("full fidelity" if p.fidelity == "full" else "low fidelity")
+        delay = p.delivery_sim_t - fastest
+        if delay >= 1:
+            tags.append(f"+{delay:.0f} s" + (" (late)" if delay >= 300 else ""))
+        p.tradeoff = " · ".join(dict.fromkeys(tags))
 
 
 def windows_from_scenario(sc: dict, statuses: dict[str, str] | None = None, moved: dict[str, float] | None = None) -> list[WindowView]:

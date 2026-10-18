@@ -23,7 +23,9 @@ export default function PlanTable() {
                     <div className="flex items-center gap-1.5">
                       {p.chosen && <span className="w-1.5 h-1.5 rounded-full bg-accent pulse" />}
                       <span className={p.chosen ? 'text-ink' : 'text-ink/85'}>{p.label}</span>
+                      {p.fidelity && <span className={`text-[8.5px] font-mono tracking-widest px-1 rounded border ${p.fidelity === 'full' ? 'border-ink/30 text-ink/70' : 'border-warn/50 text-warn'}`}>{p.fidelity === 'full' ? 'FULL' : 'LOW-FI'}</span>}
                     </div>
+                    {p.feasible && p.tradeoff && <div className="text-[9.5px] text-dim font-mono mt-0.5">{p.tradeoff}</div>}
                     {!p.feasible && p.reasons?.[0] && <div className="text-[9.5px] text-bad/80 font-mono mt-0.5">{p.reasons[0]}</div>}
                   </td>
                   <td className={`num text-right whitespace-nowrap px-2 ${late ? 'text-bad' : 'text-ink'}`}>{p.delivery_sim_t == null ? '—' : fmtT(p.delivery_sim_t)}</td>

@@ -14,6 +14,8 @@ export class OperatorState {
   competing: { fraction: number; label: string } | null = null;
   /** E1 demo/test fixture: the provider withdraws between quote and hold (one-shot). */
   failNextHold: string | null = null;
+  /** Reconciliation demo fixture: the NEXT attestation over-reports usage (still correctly signed). One-shot. */
+  misbehave: "none" | "over_attest" = "none";
   powerWh: number;
   readonly cap: Record<string, any>;
   readonly role: "compute" | "relay";
