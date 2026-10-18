@@ -170,7 +170,19 @@ class Runner:
                             w.narrate("executing", f"{leg['from']} → {leg['to']}: opening a metered MPP session, paying per 100 KB as {float(leg['bytes_mb']):.3f} MB flow.", mission_id)
                             sbody = {"mission_id": mission_id, "operator_id": leg.get("operator_id") or (from_node or {}).get("operator_id"), "grant": grant,
                                      "world_assertion": body["world_assertion"], "payload_b64": payload, "bytes_mb": leg["bytes_mb"], "base_url": url}
-                            code, data = await self._post(f"{config.BROKER_URL}/transfer/stream", sbody, timeout=180)
+                            # The payment rail settles on-chain (one tx per cent) far slower than the modeled link moves bytes.
+                            # Hold the world clock while the session runs, then advance it by the MODELED transfer time only,
+                            # so the contact window is judged by physics, not by testnet latency.
+                            was_paused = w.clock.paused
+                            t_start = w.sim_t
+                            modeled_s = float(leg["bytes_mb"]) * 8.0 / max(float(win.get("bandwidth_mbps") or 1.0), 0.001)
+                            w.clock.pause()
+                            w.emit({"type": "clock_hold", "mission_id": mission_id, "reason": "metered session settling on-chain", "window_id": leg["window_id"], "modeled_transfer_s": round(modeled_s, 1)})
+                            code, data = await self._post(f"{m.get('broker_url') or config.BROKER_URL}/transfer/stream", sbody, timeout=900)
+                            w.clock.jump(min(t_start + modeled_s, float(win["end"])))
+                            if not was_paused:
+                                w.clock.resume()
+                            w.emit({"type": "clock_release", "mission_id": mission_id, "window_id": leg["window_id"], "sim_t": round(w.sim_t, 2)})
                             if stop.is_set():
                                 return
                             reason_txt = str(data.get("reason") or data.get("error") or "")

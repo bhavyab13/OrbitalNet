@@ -21,6 +21,8 @@ export const env = {
   MOCK_SIM: process.env.MOCK_SIM === "1",
   MPP_GATE_TOOLS: process.env.MPP_GATE_TOOLS === "1",
   ADMIN_TOKEN: process.env.ADMIN_TOKEN ?? "judge-556677",
+  /** URL the sim calls back for metered relay sessions: the broker that committed a mission carries it (hosted: set in Manufact env). */
+  PUBLIC_BROKER_URL: (process.env.PUBLIC_BROKER_URL ?? `http://localhost:${process.env.PORT ?? 3000}`).replace(/\/$/, ""),
 };
 
 /** First existing path among candidates (repo file, else a copy bundled in the package). */

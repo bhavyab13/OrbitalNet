@@ -140,7 +140,10 @@ export function fxOnEvent(e: SimEvent, _s: State) {
         break
       }
       const to = e.node_id ?? e.operator_id
-      if (to) patch.particles = [...fx.particles, { id: uid(), from: BUYER_ID, to: String(to), amount: Number(e.amount_usd ?? 0), at: now, dur: 1200, kind: 'pay' }]
+      if (to) {
+        patch.particles = [...fx.particles, { id: uid(), from: BUYER_ID, to: String(to), amount: Number(e.amount_usd ?? 0), at: now, dur: 1400, kind: 'pay' }]
+        patch.cue = { kind: 'link', nodes: [BUYER_ID, String(to)], at: now }
+      }
       const m = String(e.method ?? 'mpp')
       if (['tempo', 'spt', 'stripe', 'mpp'].includes(m)) ping('Stripe', `MPP · 402 paid (${m}) · $${Number(e.amount_usd ?? 0).toFixed(2)} · ${shortRef(e.receipt_ref)}`)
       sound.payment()

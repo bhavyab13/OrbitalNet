@@ -49,7 +49,7 @@ export async function makeSessionGate(cfg: Config): Promise<SessionGate | null> 
     console.log(`[${cfg.NODE_ID}] session settlement ${s.trigger} ${s.txHash} +$${s.delta_usd.toFixed(6)} (cum $${s.amount_usd.toFixed(6)})`);
   };
   const onSessionSettlementFailure = (ctx: any) => console.warn(`[${cfg.NODE_ID}] session settlement FAILED`, ctx?.error?.message ?? ctx);
-  const common = { account: operator, operator: operator.address, store, sse: true, settlementSchedule: { amount: "0.01" }, onSessionSettlement, onSessionSettlementFailure } as any;
+  const common = { account: operator, operator: operator.address, store, sse: true, settlementSchedule: { amount: process.env.SESSION_SETTLE_USD ?? "0.10" }, onSessionSettlement, onSessionSettlementFailure } as any;
 
   let method: any;
   let rail: "stripe" | "tempo" = "tempo";

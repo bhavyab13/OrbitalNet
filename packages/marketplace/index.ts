@@ -75,9 +75,12 @@ const rw = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 {
   const _tool = (server as any).tool.bind(server);
   (server as any).tool = (def: any, handler: any) => _tool(def, async (input: any, ctx: any) => {
-    let client = "unknown";
+    let client = "MCP client";
     try { const info = ctx?.client?.info?.(); client = info?.name ? `${info.name}${info.version ? "/" + info.version : ""}` : client; } catch { /* unverified client metadata */ }
-    try { emit({ type: "mcp_client_call", tool: def.name, client, mission_id: input?.mission_id }); } catch { /* sim offline */ }
+    // Announce decision-making calls only (polling tools would flood the feed).
+    if (!["get_mission_status", "get_contact_windows", "request_quotes"].includes(def.name)) {
+      try { emit({ type: "mcp_client_call", tool: def.name, client, mission_id: input?.mission_id }); } catch { /* sim offline */ }
+    }
     return handler(input, ctx);
   });
 }
@@ -165,7 +168,7 @@ export const submitMission = server.tool({
   const grants = broker.grantsForPlan(mission_id, plan_id);
   const missing = plan.legs.map((l, i) => (l.quote_id && !grants[String(i)] ? i : -1)).filter((i) => i >= 0);
   if (missing.length) return { isError: true, content: [{ type: "text", text: `plan ${plan_id} has unpaid legs ${missing.join(",")} — call reserve_path first` }] };
-  const r = resume ? await simFetch(`/missions/${mission_id}/resume`, { method: "POST", json: { plan, grants } }) : await simFetch("/missions", { method: "POST", json: { mission: ms.mission, plan, grants } });
+  const r = resume ? await simFetch(`/missions/${mission_id}/resume`, { method: "POST", json: { plan, grants, broker_url: env.PUBLIC_BROKER_URL } }) : await simFetch("/missions", { method: "POST", json: { mission: ms.mission, plan, grants, broker_url: env.PUBLIC_BROKER_URL } });
   emit({ type: "narration", act: "execute", text: `Broker: ${resume ? "resumed" : "submitted"} ${mission_id} with plan ${plan.label}` });
   const data = { mission_id, status: String(r.status ?? "RUNNING"), plan_id };
   return { content: [{ type: "text", text: `${mission_id} ${data.status} (${plan.label})` }], structuredContent: data };

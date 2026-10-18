@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { fxOnEvent, useFx } from './fx'
 import type {
-  AuditItem, ContactWindow, Hotspot, MissionResult, MissionStatus, NarrationItem, NodeLive,
+  AuditItem, ContactWindow, DemoDef, DemoState, Hotspot, MissionResult, MissionStatus, NarrationItem, NodeLive,
   Payment, Plan, Scenario, SimEvent, Transfer, WindowStatus,
 } from './types'
 
@@ -36,6 +36,8 @@ export interface State {
   committedNode?: string
   focusLink?: [string, string]
   lastEventAt: number
+  demos: DemoDef[]
+  demo: DemoState
 
   setScenario: (s: Scenario) => void
   setMode: (m: 'live' | 'mock') => void
@@ -46,6 +48,8 @@ export interface State {
   applyState: (s: any) => void
   setResultOpen: (o: boolean) => void
   setStoryMode: (o: boolean) => void
+  setDemos: (d: DemoDef[]) => void
+  setDemo: (d: Partial<DemoState>) => void
   reset: () => void
 }
 
@@ -91,6 +95,8 @@ export const useStore = create<State>((set, get) => ({
   storyMode: false,
   hotspots: [],
   lastEventAt: 0,
+  demos: [],
+  demo: { running: false },
 
   setScenario: (s) => {
     const windows: Record<string, ContactWindow> = {}
@@ -109,6 +115,8 @@ export const useStore = create<State>((set, get) => ({
   },
   setResultOpen: (resultOpen) => set({ resultOpen }),
   setStoryMode: (storyMode) => set({ storyMode }),
+  setDemos: (demos) => set({ demos }),
+  setDemo: (d) => set({ demo: { ...get().demo, ...d } }),
   reset: () => {
     const s = get().scenario
     if (!s) return
@@ -386,6 +394,22 @@ export const useStore = create<State>((set, get) => ({
       case 'narration': {
         patch.narration = push(s.narration, { id: uid(), sim_t: simT, act: e.act, text: e.text }, 60)
         if (e.act) patch.currentAct = e.act
+        break
+      }
+      case 'demo_started': {
+        patch.demo = { running: true, id: e.id, title: e.title, subtitle: e.subtitle, total: e.total, step: 0, startedAt: Date.now(), done: undefined }
+        patch.storyMode = true
+        audit('info', `Demo ${e.id} started: ${e.title ?? ''}`, 'info')
+        break
+      }
+      case 'demo_step': {
+        patch.demo = { ...s.demo, running: true, id: e.id ?? s.demo.id, step: e.step, total: e.total ?? s.demo.total, stepTitle: e.title, stepDetail: e.detail, done: undefined }
+        patch.currentAct = e.title
+        break
+      }
+      case 'demo_done': {
+        patch.demo = { ...s.demo, running: false, done: { status: e.status ?? 'done', summary: e.summary, at: Date.now() } }
+        audit('info', `Demo ${e.id ?? s.demo.id ?? ''} finished: ${e.status ?? ''}`, e.status === 'DELIVERED' ? 'ok' : 'warn')
         break
       }
       case 'result': {

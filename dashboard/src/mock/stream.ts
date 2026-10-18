@@ -195,6 +195,77 @@ export function startMock() {
   const startAt = Number(new URLSearchParams(location.search).get('t') ?? 0)
   if (startAt > 0) { simT = startAt; applyUpTo(startAt); st.setPositions(allPositions(nodeIds, epoch, simT)) }
 
+  // ---- mock scripted demos (same timeline, narrated as numbered steps)
+  const DEMO_DEFS = [
+    { id: 1, title: 'Impossible alone', subtitle: 'Two strangers, one deadline: conditional commitment, Stripe-paid grants, real inference on an InstaBox satellite', steps: [
+      { t: 0, title: 'A mission arrives', detail: '3,812 real VIIRS fire detections over Papua; a perimeter is due in 12 minutes' },
+      { t: 6, title: 'Impossible alone', detail: "SENTINEL-2A's own pass is after the deadline; raw relay does not fit the 40 s crosslink" },
+      { t: 18, title: 'Two feasible plans, one choice', detail: 'Full-fidelity inference + relay $2.73 vs low-fidelity crop $0.84' },
+      { t: 25, title: 'Conditional commitment', detail: 'Holds on every leg, then two MPP payments and two signed grants' },
+      { t: 60, title: 'Real work on a stranger\'s machine', detail: 'PHISAT-2 verifies the grant offline and runs fire detection on the real scene' },
+      { t: 125, title: 'Attestation', detail: 'Signed usage: 180 MB in, 41 KB out, 38 s compute, 28 Wh' },
+    ] },
+    { id: 2, title: 'Outage, refund, and a stranger', subtitle: 'The link dies after the work is done: result preserved, grant refunded, a new provider boots and gets paid', steps: [
+      { t: 0, title: 'A mission arrives', detail: 'Same mission, same deadline' },
+      { t: 25, title: 'Paid and running', detail: 'Two grants, two receipts' },
+      { t: 76, title: 'Inference on PHISAT-2', detail: 'Grant verified offline; result committed on the satellite' },
+      { t: 280, title: 'Ground-station outage after the work is done', detail: 'Result preserved, relay grant refunded by voucher' },
+      { t: 290, title: 'No feasible path — and no invented answer', detail: 'The agent waits and watches the marketplace' },
+      { t: 304, title: 'A stranger arrives', detail: 'Northstar Relay boots from a snapshot on InstaBox and publishes a signed manifest' },
+      { t: 315, title: 'Zero-integration onboarding', detail: 'Manifest verified from its signature alone; quote, hold, pay, grant' },
+      { t: 430, title: 'Metered downlink, settled on Stripe', detail: 'Bytes paid per 100 KB through an MPP session; delivered' },
+    ] },
+    { id: 3, title: 'Intent changes the deal, and a provider lies', subtitle: 'A cheaper mission picks the low-fidelity crop; reconciliation catches an over-reported attestation', steps: [
+      { t: 0, title: 'A cheaper mission', detail: '"Rough extent, under $1.50" — intent, not a fixed rule, picks the plan' },
+      { t: 20, title: 'Low-fidelity crop chosen', detail: '$0.84, 40 MB through the short crosslink, delivered T+306' },
+      { t: 76, title: 'A provider over-reports', detail: 'Orbital Foundry attests 3× the compute it was granted' },
+      { t: 125, title: 'Reconciliation catches it', detail: 'receipt ↔ grant ↔ attestation disagree; provider marked untrusted' },
+      { t: 300, title: 'Delivered anyway', detail: 'The honest legs settle; the lying attestation is flagged' },
+    ] },
+  ]
+  let demoId: number | null = null
+  let demoStepIdx = 0
+  const demoTick = () => {
+    if (demoId == null) return
+    const d = DEMO_DEFS.find((x) => x.id === demoId)!
+    while (demoStepIdx < d.steps.length && d.steps[demoStepIdx].t <= simT) {
+      const st = d.steps[demoStepIdx]
+      useStore.getState().applyEvent({ type: 'demo_step', sim_t: Math.floor(simT), id: d.id, step: demoStepIdx + 1, total: d.steps.length, title: st.title, detail: st.detail })
+      demoStepIdx++
+    }
+    if (useStore.getState().status === 'DELIVERED' && demoId != null) {
+      const s = useStore.getState()
+      s.applyEvent({ type: 'demo_done', sim_t: Math.floor(simT), id: demoId, status: 'DELIVERED', summary: { delivered_sim_t: s.result?.delivered_sim_t ?? Math.floor(simT), total_paid_usd: s.spentUsd, fidelity: demoId === 3 ? 'low' : 'full', reconcile_ok: demoId !== 3, reconcile_summary: demoId === 3 ? '3 grants, 2 fulfilled, 1 refunded, 2 violations' : '3 grants, 2 fulfilled, 1 refunded, 0 violations' } })
+      demoId = null
+    }
+  }
+  ;(window as any).__mockDemos = {
+    list: () => DEMO_DEFS.map(({ id, title, subtitle, steps }) => ({ id, title, subtitle, steps: steps.map(({ title, detail }) => ({ title, detail })) })),
+    start: (id: number) => {
+      const d = DEMO_DEFS.find((x) => x.id === id) ?? DEMO_DEFS[0]
+      ;(window as any).__mockClock.jump(0); useStore.setState({ paused: false })
+      demoId = d.id; demoStepIdx = 0
+      useStore.getState().applyEvent({ type: 'demo_started', sim_t: 0, id: d.id, title: d.title, subtitle: d.subtitle, total: d.steps.length })
+      return { ok: true, id: d.id }
+    },
+    stop: () => { demoId = null; useStore.getState().setDemo({ running: false }); return { ok: true } },
+    status: () => ({ running: demoId != null, step: demoStepIdx, total: demoId ? DEMO_DEFS.find((x) => x.id === demoId)!.steps.length : 0 }),
+    stripe: () => {
+      const s = useStore.getState(); const now = Math.floor(Date.now() / 1000)
+      const payments = s.payments.filter((p) => !p.metered || p.settled).map((p, i) => ({ id: 'pi_3URv' + (p.receipt_ref || p.id).replace(/[^a-zA-Z0-9]/g, '').slice(2, 18).padEnd(16, 'x'), amount_cents: Math.max(1, Math.round(p.amount_usd * 100)), currency: 'usd', status: i === 0 && Date.now() - s.lastEventAt < 2500 ? 'processing' : 'succeeded', intent: (p.metered ? 'session' : 'charge') as 'session' | 'charge', created: now - Math.max(0, Math.floor((s.simT - p.sim_t) / Math.max(1, s.accel))), description: p.description ?? null, url: 'https://dashboard.stripe.com/test/payments' }))
+      return { payments, account: 'acct_1URuY0GhDL5moMEd · sandbox', fetched_at: new Date().toISOString() }
+    },
+    instabox: () => {
+      const s = useStore.getState(); const n = s.nodes
+      const box = (name: string, node: string, role: string, url: string, on: boolean, extra: any = {}) => ({ name, state: 'Running', template: 'agent-browser', node_id: node, operator_id: name, role, public_url: url, operator: on ? { online: true, sim_t: Math.floor(s.simT), grants: n[node]?.grants ?? { active: 0, fulfilled: 0, revoked: 0 }, rail: 'stripe', ...extra } : null })
+      return { boxes: [
+        box('orbital-foundry', 'PHISAT-2', 'compute', 'https://7001-agqu6w7vgunkts2l5yop63jie4.instabox.tech', true, { power_wh: Math.round(n['PHISAT-2']?.power_pct ?? 100) }),
+        box('lumen-relay', 'EDRS-C', 'relay', 'https://7002-agqu6xts2sw3yul4iq7yfow2wq.instabox.tech', true, { capacity: { mb: 500 } }),
+        box('northstar-relay', 'STARLINK-3005', 'relay', 'https://7003-agqu6xuufihmjk27jkjrx2n4ia.instabox.tech', !!n['STARLINK-3005']?.online, { capacity: { mb: 200 } }),
+      ], fetched_at: new Date().toISOString() }
+    },
+  }
+
   const loop = () => {
     if (stopped) return
     const s = useStore.getState()
@@ -204,6 +275,7 @@ export function startMock() {
     if (!s.paused) {
       simT += dt * s.accel
       applyUpTo(simT)
+      demoTick()
       posAcc += dt
       if (posAcc > 0.25) {
         posAcc = 0
@@ -211,7 +283,7 @@ export function startMock() {
       }
       s.applyEvent({ type: 'tick', sim_t: Math.floor(simT) })
       // loop the story after a while
-      if (simT > 560) { simT = 0; idx = 0; s.reset() }
+      if (simT > 560 && demoId == null) { simT = 0; idx = 0; s.reset() }
     }
   }
   const timer = setInterval(loop, 50)

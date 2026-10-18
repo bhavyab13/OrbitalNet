@@ -96,3 +96,15 @@ Reads `SIM_URL` (default `http://localhost:8000`), subscribes to `/ws`. Panels: 
 
 ### Fidelity (sim, added 2026-10-18)
 Mission fields: `fidelity` ("full"), `degraded` `{label, payload_mb, fidelity:"low", note}`, `required_fidelity` ("full"|"low"|"any", default "any"). `/plan` honours them (defaults from the running mission's overrides, else the scenario). Every plan now carries `fidelity`, `tradeoff` (e.g. "fastest · full fidelity", "cheapest · low fidelity · +6 s", "cheapest full fidelity · full fidelity · +600 s (late)") and `payload_mb`. Raw routes get an extra **low-fidelity** candidate carrying `degraded.payload_mb` (label "Low-fidelity raw crop (40 MB) via …"); with `required_fidelity:"full"` those are infeasible ("mission requires full fidelity"). Intermediate nodes must offer relay capacity unless they are the compute node. For a low-fidelity plan the runner builds a REAL deliverable (Pillow 1/8 downsample of the scene, JPEG q70) as `result {kind:"raw_crop", fidelity:"low", summary, thumbnail_b64, geojson:[]}`, sets `committed` to the source node with the modeled `result_mb`, and the `/transmit` payload is that result (`bytes_mb` stays the modeled 40 MB). `mission_status`/`delivered` events and the mission object carry `fidelity`.
+
+### 1.x Demos (one-button programs) and live sponsor proxies — sim
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/demos` | `{demos:[{id, title, subtitle, mission_id, steps:[{title, detail}]}], running:{…}}` |
+| POST | `/demos/{id}/start` | `{ok, id}`; `409` if a demo is running. Resets broker + world + operators, sets accel `DEMO_ACCEL` (2), arms E1 / over-attest where the demo says, starts the deterministic buyer (`packages/buyer --auto --id <mission_id> [--text --budget]`) and advances steps on real events. |
+| POST | `/demos/stop` | kills the buyer, stops the runner, emits `demo_done {status:"STOPPED"}` |
+| GET | `/demos/status` | `{running: id|null, step, total, status, mission_id}` |
+| GET | `/stripe/payments?limit=12` | live `GET /v1/payment_intents` (server-side key): `{payments:[{id, amount_cents, currency, status, intent:"charge"|"session"|null, created, description, url}], account, fetched_at}`; 2 s cache |
+| GET | `/instabox/boxes` | `instabox ls --json` + each operator's `/status`: `{boxes:[{name, state, template, created, node_id, operator_id, role, public_url, operator:{online, sim_t, grants, power_wh, capacity, rail}|null}], fetched_at}`; 8 s cache |
+WS events: `demo_started {id,title,subtitle,total,accel}`, `demo_step {id,step,total,title,detail,sim_t}` (when a step begins), `fast_forward {from_sim_t,to_sim_t,label}` (dead air between contact windows is skipped; narration explains), `demo_done {id,status,summary:{delivered_sim_t,total_paid_usd,fidelity,reconcile_ok,reconcile_summary,violations}}`.
+Demos: **1 Impossible alone** (E1 armed, fire-001), **2 Outage, refund, and a stranger** (E2 + Northstar boot on InstaBox, fire-001), **3 Intent changes the deal, and a provider lies** (budget $1.50 → low-fi crop, EDRS-C over-attests, fire-003). `world.load()` now keeps the event bus across resets so dashboards keep receiving events after `/reset`.

@@ -4,11 +4,12 @@ import * as THREE from 'three'
 import { useStore } from '../store'
 import { useFx, BUYER_ID, BUYER_POS, GOLD, fxNow } from '../fx'
 import { startFxLayer } from './FxLayer'
+import { buildSatellite } from '../lib/satModel'
+import { setupCinema, type Cinema } from '../lib/cinema'
+import { globeReg, dispAlt } from '../lib/globeReg'
 import type { ContactWindow, NodeLive, Position } from '../types'
 
-const R = 6371
-/** Display altitude in globe radii; GEO compressed so it stays in frame. */
-export const dispAlt = (altKm: number) => (altKm > 20000 ? 0.85 + 0.15 * Math.min(1, (altKm - 20000) / 20000) : altKm / R)
+export { dispAlt }
 
 function interpPos(n: NodeLive, simT: number): Position | undefined {
   if (n.trail && n.trailT && n.trailT.length > 1) {
@@ -30,34 +31,16 @@ function interpPos(n: NodeLive, simT: number): Position | undefined {
   return n.pos
 }
 
-function glowTexture(color: string) {
-  const c = document.createElement('canvas')
-  c.width = c.height = 128
-  const g = c.getContext('2d')!
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64)
-  grd.addColorStop(0, '#ffffff')
-  grd.addColorStop(0.18, color)
-  grd.addColorStop(0.45, color + '66')
-  grd.addColorStop(1, color + '00')
-  g.fillStyle = grd
-  g.fillRect(0, 0, 128, 128)
-  return new THREE.CanvasTexture(c)
-}
-const texCache: Record<string, THREE.Texture> = {}
-const tex = (color: string) => (texCache[color] ??= glowTexture(color))
-
-function satSprite(d: any) {
-  const grp = new THREE.Group()
-  const m = new THREE.SpriteMaterial({ map: tex(d.color), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: d.online ? 1 : 0.35 })
-  const s = new THREE.Sprite(m)
-  const size = d.kind === 'particle' ? 5 : d.active ? 11 : 8
-  s.scale.set(size, size, 1)
-  grp.add(s)
-  if (d.kind === 'sat') {
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 10), new THREE.MeshBasicMaterial({ color: '#ffffff' }))
-    grp.add(core)
-  }
-  return grp
+const satCache = new Map<string, THREE.Group>()
+function satObject(d: any) {
+  let g = satCache.get(d.id)
+  if (!g) { g = buildSatellite(d.id, d.color, d.role ?? 'relay'); satCache.set(d.id, g) }
+  g.userData.active = d.active
+  g.traverse((o) => { const m = (o as any).material as THREE.Material | undefined; if (m && (o as any).isMesh) m.opacity = 1 })
+  g.visible = true
+  const flare = g.getObjectByName('flare') as THREE.Sprite | undefined
+  if (flare) (flare.material as THREE.SpriteMaterial).opacity = d.online ? 0.9 : 0.25
+  return g
 }
 
 function angDeg(a: Position, b: Position) {
@@ -92,6 +75,7 @@ export default function Globe() {
   const posRef = useRef<Record<string, Position>>({})
   const lastUserDrag = useRef(0)
   const [ready, setReady] = useState(false)
+  const cinema = useRef<Cinema | undefined>(undefined)
 
   const gsMap = useMemo(() => Object.fromEntries((scenario?.ground_stations ?? []).map((g) => [g.gs_id, g])), [scenario])
   const nodeMeta = useMemo(() => Object.fromEntries((scenario?.nodes ?? []).map((n) => [n.node_id, n])), [scenario])
@@ -108,6 +92,7 @@ export default function Globe() {
     for (const [id, g] of Object.entries(gsMap)) out[id] = { lat: g.lat, lon: g.lon, alt_km: 0 }
     out[BUYER_ID] = BUYER_POS
     posRef.current = out
+    globeReg.pos.current = out
     return out
   }, [nodes, simT, gsMap])
 
@@ -123,19 +108,10 @@ export default function Globe() {
     for (const [id, n] of Object.entries(nodes)) {
       const p = pos[id]
       if (!p) continue
-      arr.push({ id, kind: 'sat', lat: p.lat, lng: p.lon, alt: dispAlt(p.alt_km), color: nodeMeta[id]?.color ?? '#9ad', online: n.online, active: activeNodes.has(id) })
-    }
-    for (const t of Object.values(transfers)) {
-      if (t.done || t.pct >= 100) continue
-      const a = pos[t.from], b = pos[t.to]
-      if (!a || !b) continue
-      const f = Math.max(0.02, Math.min(0.98, t.pct / 100))
-      const p = lerpPos(a, b, f)
-      const bul = Math.sin(Math.PI * f) * 0.04
-      arr.push({ id: 'particle-' + t.window_id, kind: 'particle', lat: p.lat, lng: p.lon, alt: dispAlt(p.alt_km) + bul, color: '#ffffff', online: true, active: true })
+      arr.push({ id, kind: 'sat', lat: p.lat, lng: p.lon, alt: dispAlt(p.alt_km), color: nodeMeta[id]?.color ?? '#9ad', role: nodeMeta[id]?.role, online: n.online, active: activeNodes.has(id) })
     }
     return arr
-  }, [nodes, pos, transfers, nodeMeta, activeNodes])
+  }, [nodes, pos, nodeMeta, activeNodes])
 
   // Orbit trails + delivered result outlines (fire perimeters projected onto the planet)
   const paths = useMemo(() => {
@@ -186,8 +162,8 @@ export default function Globe() {
       let colors: string[]
       let stroke = 0.35
       let dashLen = 0.4, dashGap = 0.1, anim = 0
-      if (st === 'killed') { colors = ['#f87171', '#f87171']; stroke = 0.5; dashLen = 0.08; dashGap = 0.08 }
-      else if (st === 'open') { colors = [color, '#ffffff']; stroke = tr && !tr.done ? 1.1 : 0.7; dashLen = 0.25; dashGap = 0.12; anim = tr && !tr.done ? 900 : 2200 }
+      if (st === 'killed') { colors = ['#f87171', '#f87171']; stroke = 0.4; dashLen = 0.08; dashGap = 0.08 }
+      else if (st === 'open') { colors = [color + 'cc', '#ffffffaa']; stroke = tr && !tr.done ? 0.5 : 0.38; dashLen = 0.25; dashGap = 0.12; anim = tr && !tr.done ? 900 : 2200 }
       else if (st === 'future') { colors = inPlan ? [color + 'aa', color + 'aa'] : ['rgba(140,170,210,0.22)', 'rgba(140,170,210,0.22)']; stroke = inPlan ? 0.4 : 0.22; dashLen = 0.05; dashGap = 0.05 }
       else { colors = [color + '55', color + '55']; stroke = 0.25; dashLen = 1; dashGap = 0 }
       const ang = angDeg(a, b)
@@ -233,8 +209,8 @@ export default function Globe() {
 
   // Night lights as emissive map
   const material = useMemo(() => {
-    const m = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 8, specular: new THREE.Color(0x223344) })
-    new THREE.TextureLoader().load('/tex/earth-night.jpg', (t) => { t.colorSpace = THREE.SRGBColorSpace; m.emissiveMap = t; m.emissive = new THREE.Color(0xbfc8d8); m.emissiveIntensity = 0.55; m.needsUpdate = true })
+    const m = new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 12, specular: new THREE.Color(0x1e3048) })
+    new THREE.TextureLoader().load('/tex/earth-night.jpg', (t) => { t.colorSpace = THREE.SRGBColorSpace; m.emissiveMap = t; m.emissive = new THREE.Color(0xd8c8a0); m.emissiveIntensity = 0.75; m.needsUpdate = true })
     return m
   }, [])
 
@@ -246,12 +222,9 @@ export default function Globe() {
     const ctl = g.controls() as any
     ctl.enableDamping = true
     ctl.dampingFactor = 0.08
-    if (status === 'IDLE') {
-      ctl.autoRotate = true
-      ctl.autoRotateSpeed = 0.35
-    } else {
-      ctl.autoRotate = false
-    }
+    // the camera never sits still: slow orbital drift during the mission, a faster sweep while idle
+    ctl.autoRotate = true
+    ctl.autoRotateSpeed = status === 'IDLE' ? 0.45 : 0.14
   }, [status])
 
   const userBusy = () => Date.now() - lastUserDrag.current < 8000
@@ -262,8 +235,11 @@ export default function Globe() {
     const mid = b ? lerpPos(a, b, 0.5) : a
     const span = b ? Math.hypot(a.lat - b.lat, Math.min(Math.abs(a.lon - b.lon), 360 - Math.abs(a.lon - b.lon))) : 20
     const geo = (a.alt_km > 20000 || (b && b.alt_km > 20000))
-    const altitude = geo ? 2.6 : Math.min(2.4, Math.max(1.25, span / 40))
-    g.pointOfView({ lat: mid.lat, lng: mid.lon, altitude }, ms)
+    const altitude = geo ? 2.3 : Math.min(2.2, Math.max(1.05, span / 44))
+    // swoop: a short pull-back then a push-in reads as a camera move, not a cut
+    const cur = g.pointOfView()
+    g.pointOfView({ lat: (cur.lat + mid.lat) / 2, lng: (cur.lng + mid.lon) / 2, altitude: Math.max(cur.altitude ?? 2, altitude) + 0.35 }, ms * 0.45)
+    setTimeout(() => g.pointOfView({ lat: mid.lat, lng: mid.lon, altitude }, ms * 0.75), ms * 0.45)
   }
   useEffect(() => {
     const g = ref.current
@@ -284,11 +260,12 @@ export default function Globe() {
     const b = scenario.mission.scene.bbox
     const papua = { lat: (b[0] + b[2]) / 2, lng: (b[1] + b[3]) / 2 }
     const ctl = g.controls() as any
-    if (cue.kind === 'papua') { ctl.autoRotate = false; g.pointOfView({ ...papua, altitude: 1.55 }, 1500) }
-    else if (cue.kind === 'result') { ctl.autoRotate = false; g.pointOfView({ ...papua, altitude: 1.25 }, 1800) }
-    else if (cue.kind === 'link' && cue.nodes) frameNodes(cue.nodes, 1500)
-    else if (cue.kind === 'node' && cue.nodes) { const p = pos[cue.nodes[0]]; if (p) g.pointOfView({ lat: p.lat, lng: p.lon, altitude: 1.9 }, 1500) }
-    else if (cue.kind === 'pullout') { const cur = g.pointOfView(); g.pointOfView({ lat: cur.lat, lng: cur.lng, altitude: Math.min(3.2, (cur.altitude ?? 2) + 0.7) }, 1500) }
+    ctl.autoRotate = true
+    if (cue.kind === 'papua') { g.pointOfView({ lat: papua.lat - 14, lng: papua.lng + 8, altitude: 1.3 }, 2200) } // low, oblique: the limb and atmosphere fill the frame
+    else if (cue.kind === 'result') { g.pointOfView({ lat: papua.lat - 5, lng: papua.lng + 3, altitude: 0.9 }, 2000) }
+    else if (cue.kind === 'link' && cue.nodes) frameNodes(cue.nodes, 1800)
+    else if (cue.kind === 'node' && cue.nodes) { const p = pos[cue.nodes[0]]; if (p) { const cur = g.pointOfView(); g.pointOfView({ lat: cur.lat, lng: cur.lng, altitude: (cur.altitude ?? 2) + 0.6 }, 700); setTimeout(() => g.pointOfView({ lat: p.lat - 4, lng: p.lon + 6, altitude: 1.35 }, 1500), 700) } }
+    else if (cue.kind === 'pullout') { const cur = g.pointOfView(); g.pointOfView({ lat: cur.lat - 10, lng: cur.lng + 25, altitude: Math.min(3.2, (cur.altitude ?? 2) + 1.1) }, 2200) }
     else if (cue.kind === 'idle') { ctl.autoRotate = true }
   }, [cue, scenario, ready])
 
@@ -297,8 +274,10 @@ export default function Globe() {
     const g = ref.current
     if (!g || !scenario) return
     const b = scenario.mission.scene.bbox
-    g.pointOfView({ lat: (b[0] + b[2]) / 2 - 8, lng: (b[1] + b[3]) / 2 + 10, altitude: 2.1 }, 0)
-  }, [scenario])
+    g.pointOfView({ lat: (b[0] + b[2]) / 2 - 16, lng: (b[1] + b[3]) / 2 + 18, altitude: 1.6 }, 0)
+    const t = setTimeout(() => cinema.current?.placeSunForCamera(), 80)
+    return () => clearTimeout(t)
+  }, [scenario, ready])
 
   // Size tracking
   const [size, setSize] = useState({ w: 800, h: 600 })
@@ -323,14 +302,14 @@ export default function Globe() {
         bumpImageUrl="/tex/earth-topology.png"
         globeMaterial={material}
         showAtmosphere
-        atmosphereColor="#5fb3ff"
-        atmosphereAltitude={0.22}
+        atmosphereColor="#6fbcff"
+        atmosphereAltitude={0.2}
         animateIn={false}
         objectsData={objects}
         objectLat="lat"
         objectLng="lng"
         objectAltitude="alt"
-        objectThreeObject={satSprite as any}
+        objectThreeObject={satObject as any}
         objectLabel={(d: any) => (d.kind === 'sat' ? `<div style="font:12px monospace;color:${d.color}">${d.id}</div>` : '')}
         pathsData={paths}
         pathPoints="pts"
@@ -402,11 +381,11 @@ export default function Globe() {
           const ctl = g.controls() as any
           ctl.autoRotate = true
           ctl.autoRotateSpeed = 0.35
-          ctl.minDistance = 120
+          ctl.minDistance = 112
           ctl.maxDistance = 800
-          const scene = g.scene()
-          scene.add(new THREE.AmbientLight(0x6a7a99, 0.5))
           ctl.addEventListener('start', () => { lastUserDrag.current = Date.now() })
+          globeReg.globe = g
+          cinema.current = setupCinema(g, wrap.current?.clientWidth ?? 1200, wrap.current?.clientHeight ?? 800)
           startFxLayer(g, posRef, (id) => nodeMetaRef.current[id]?.color ?? '#9ad')
           setReady(true)
         }}

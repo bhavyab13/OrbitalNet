@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -18,9 +18,11 @@ from . import config
 from .planner import plan as run_planner
 from .runner import Runner
 from .world import World
+from . import demos as demos_mod
 
 world = World()
 runner = Runner(world)
+director = demos_mod.Director(world, runner)
 _tick_task: asyncio.Task | None = None
 
 
@@ -31,6 +33,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        director._kill_buyer()
         runner.stop_all()
         if _tick_task:
             _tick_task.cancel()
@@ -143,7 +146,9 @@ async def create_mission(body: dict[str, Any]):
     paid = _total_paid(grants) + float(prior.get("total_paid_usd", 0) if body.get("keep_history") else 0)
     ms = {"mission_id": mid, "mission": mission, "plan": plan_, "grants": grants, "status": "PLANNED", "current_leg": None,
           "arrival_sim_t": prior.get("arrival_sim_t", round(world.sim_t, 2)), "committed": None, "result": None,
-          "total_paid_usd": paid, "budget_remaining_usd": round(float(mission["budget_usd"]) - paid, 4), "replans": 0, "audit": world.audit.get(mid, [])[-200:]}
+          "total_paid_usd": paid, "budget_remaining_usd": round(float(mission["budget_usd"]) - paid, 4), "replans": 0, "audit": world.audit.get(mid, [])[-200:],
+          # the broker that committed this mission carries its metered sessions (hosted Manufact broker or local dev broker)
+          "broker_url": (body.get("broker_url") or config.BROKER_URL).rstrip("/")}
     world.missions[mid] = ms
     for i, leg in enumerate(plan_["legs"]):
         leg["status"] = "PENDING"
@@ -167,6 +172,7 @@ async def resume_mission(mid: str, body: dict[str, Any]):
     ms["previous_grants"] = {**ms.get("previous_grants", {}), **{f"r{ms.get('replans', 0)}:{k}": v for k, v in ms["grants"].items()}}
     ms["plan"] = plan_
     ms["grants"] = grants
+    ms["broker_url"] = (body.get("broker_url") or ms.get("broker_url") or config.BROKER_URL).rstrip("/")
     ms["replans"] = ms.get("replans", 0) + 1
     # Only grants not seen before count as new spend (the broker re-sends every grant on resume).
     known_ids = {g.get("grant_id") for g in list(ms.get("previous_grants", {}).values()) if isinstance(g, dict)}
@@ -346,7 +352,12 @@ def post_event(ev: dict[str, Any]):
 
 
 @app.post("/reset")
-async def reset():
+async def reset(request: Request):
+    # The sim is shared with the hosted broker over a public tunnel. While a one-button demo is running,
+    # only local callers (the director / judge panel) may wipe the world.
+    client_ip = (request.client.host if request.client else "") or ""
+    if director.running is not None and client_ip not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(409, f"demo {director.running} is running; remote reset refused")
     runner.stop_all()
     world.load()
     # best-effort: reset every known operator's capacity/grants so scarcity pricing starts fresh
@@ -358,6 +369,44 @@ async def reset():
                 pass
     world.emit({"type": "reset"})
     return world.state()
+
+
+# ---------- demos (one-button programs) + live sponsor proxies
+@app.get("/demos")
+def demos_list():
+    return {"demos": [{"id": d["id"], "title": d["title"], "subtitle": d["subtitle"], "mission_id": d["mission_id"], "steps": d["steps"]} for d in demos_mod.DEMOS], "running": director.status_json()}
+
+
+@app.get("/demos/status")
+def demos_status():
+    return director.status_json()
+
+
+@app.post("/demos/stop")
+async def demos_stop():
+    await director.stop("STOPPED")
+    return {"ok": True}
+
+
+@app.post("/demos/{demo_id}/start")
+async def demos_start(demo_id: int):
+    if director.running is not None:
+        raise HTTPException(409, f"demo {director.running} is running; POST /demos/stop first")
+    try:
+        await director.start(demo_id)
+    except KeyError:
+        raise HTTPException(404, "unknown demo")
+    return {"ok": True, "id": demo_id}
+
+
+@app.get("/stripe/payments")
+async def stripe_payments(limit: int = 12):
+    return await demos_mod.stripe_payments(max(1, min(int(limit), 50)))
+
+
+@app.get("/instabox/boxes")
+async def instabox_boxes():
+    return await demos_mod.instabox_boxes()
 
 
 @app.websocket("/ws")

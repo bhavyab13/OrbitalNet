@@ -5,16 +5,21 @@ export function makeWorld(cfg: Config) {
   const boot = Date.now();
   let cache: { t: number; at: number } | null = null;
   let worldPub = cfg.worldPub;
+  const accel = cfg.scenario.sim?.accel ?? 1;
   async function simT(): Promise<number> {
     if (cache && Date.now() - cache.at < 500) return cache.t;
-    try {
-      const r = await fetch(`${cfg.SIM_URL}/state`, { signal: AbortSignal.timeout(800) });
-      const j = (await r.json()) as { sim_t: number };
-      cache = { t: Math.floor(Number(j.sim_t)), at: Date.now() };
-      return cache.t;
-    } catch {
-      return Math.floor(((Date.now() - boot) / 1000) * (cfg.scenario.sim?.accel ?? 1));
+    // Remote operators (InstaBox) reach the world over a tunnel: allow a slow round trip, and if it
+    // fails, extrapolate from the last known world time instead of inventing a clock of our own.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetch(`${cfg.SIM_URL}/state`, { signal: AbortSignal.timeout(attempt === 0 ? 4000 : 6000) });
+        const j = (await r.json()) as { sim_t: number };
+        cache = { t: Math.floor(Number(j.sim_t)), at: Date.now() };
+        return cache.t;
+      } catch { /* retry once */ }
     }
+    if (cache) return Math.floor(cache.t + ((Date.now() - cache.at) / 1000) * accel);
+    return Math.floor(((Date.now() - boot) / 1000) * accel);
   }
   async function fetchWorldPub(): Promise<string> {
     if (worldPub) return worldPub;

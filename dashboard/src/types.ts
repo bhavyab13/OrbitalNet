@@ -191,3 +191,28 @@ export interface SimEvent {
   sim_t?: number
   [k: string]: any
 }
+
+// ---- scripted demos + live proof panels
+export interface DemoStep { title: string; detail?: string }
+export interface DemoDef { id: number; title: string; subtitle?: string; steps: DemoStep[] }
+export interface DemoState {
+  running: boolean
+  id?: number
+  title?: string
+  subtitle?: string
+  step?: number
+  total?: number
+  stepTitle?: string
+  stepDetail?: string
+  startedAt?: number
+  done?: { status: string; summary?: { delivered_sim_t?: number | null; total_paid_usd?: number; fidelity?: string; reconcile_ok?: boolean; reconcile_summary?: string }; at: number }
+}
+export interface StripePayment {
+  id: string; amount_cents: number; currency: string; status: string
+  intent: 'charge' | 'session' | null; created: number; description?: string | null; url?: string
+}
+export interface InstaBoxRow {
+  name: string; state: string; template?: string; created?: string
+  node_id?: string; operator_id?: string; role?: string; public_url?: string
+  operator: { online: boolean; sim_t?: number; grants?: { active: number; fulfilled: number; revoked: number }; power_wh?: number; capacity?: Record<string, number>; rail?: string } | null
+}

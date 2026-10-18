@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { clock, disrupt } from '../lib/controls'
 import { fmtT } from './MissionHUD'
+import DemoLauncher from './DemoLauncher'
 
 const typeIcon: Record<string, string> = { kill_link: '⚡', competing_reserve: '⚔', launch_provider: '🛰', revoke: '⊗', restore_link: '↻' }
 
@@ -19,6 +20,10 @@ export default function Judge() {
   const killed = Object.values(windows).filter((w) => w.status === 'killed')
   return (
     <div className="h-full scroll px-4 py-4 max-w-[560px] mx-auto flex flex-col gap-3">
+      <div className="panel p-3 flex flex-col gap-2">
+        <div className="panel-title">Scripted demos</div>
+        <DemoLauncher big />
+      </div>
       <div className="panel p-3">
         <div className="panel-title">Judge console</div>
         <div className="grid grid-cols-3 gap-2 mt-2">

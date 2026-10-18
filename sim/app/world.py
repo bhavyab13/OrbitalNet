@@ -84,7 +84,11 @@ class World:
         self.gs = gs_ids(self.sc)
         self.gs_map = {g["gs_id"]: g for g in self.sc["ground_stations"]}
         self.clock = Clock(self.sc["sim"]["accel"])
-        self.bus = EventBus()
+        # keep the event bus across resets so connected dashboards keep receiving events
+        if not hasattr(self, "bus"):
+            self.bus = EventBus()
+        else:
+            self.bus.tail = []
         self.orbits = Orbits(self.sc, config.TLE_PATH)
         self.killed: set[str] = set()
         self.moved_mb: dict[str, float] = {}
