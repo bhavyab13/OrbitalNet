@@ -1,0 +1,6 @@
+{
+  "name": "orbitalnet",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "engines": { "node": ">=22" }
+}

@@ -1,0 +1,274 @@
+{
+  "scenario_id": "papua-fire-2026-10-17",
+  "description": "Urgent wildfire assessment over Western Province, Papua New Guinea / Papua, Indonesia. Real VIIRS detections 2026-10-17 (3,812 hotspots in bbox). Spacecraft positions are real SGP4 propagation of real TLEs (CelesTrak 2026-10-17). Contact windows, bandwidths, power and prices are MODELED scenario values.",
+  "epoch_utc": "2026-10-17T03:17:00Z",
+  "sim": {
+    "accel": 4,
+    "tick_s": 1,
+    "horizon_s": 2400
+  },
+  "mission": {
+    "mission_id": "fire-001",
+    "buyer_id": "buyer:emergency-ops",
+    "text": "Analyze the fresh multispectral scene over the Papua fire complex for active fire fronts and deliver a fire-perimeter assessment to any ground station within 12 minutes. Budget $6.00.",
+    "source_node": "SENTINEL-2A",
+    "payload_mb": 180,
+    "op": "image-inference",
+    "model": "fire-detector-v1",
+    "result_mb_estimate": 0.04,
+    "deadline_sim_t": 720,
+    "budget_usd": 6.0,
+    "scene": {
+      "bbox": [
+        -8.5,
+        139.5,
+        -5.5,
+        142.5
+      ],
+      "image_file": "data/papua_VIIRS_SNPP_CorrectedReflectance_BandsM11-I2-I1.jpg",
+      "truecolor_file": "data/papua_VIIRS_SNPP_CorrectedReflectance_TrueColor.jpg",
+      "truth_csv": "data/viirs_24h.csv"
+    }
+  },
+  "nodes": [
+    {
+      "node_id": "SENTINEL-2A",
+      "role": "imaging",
+      "operator_id": "heliostat-imaging",
+      "operator_name": "Heliostat Imaging (buyer-side)",
+      "tle_name": "SENTINEL-2A",
+      "color": "#4fd1ff",
+      "onboard": {
+        "compute": "insufficient (0.3 TOPS, 400 s for this scene)",
+        "power_wh": 60
+      }
+    },
+    {
+      "node_id": "PHISAT-2",
+      "role": "compute",
+      "operator_id": "orbital-foundry",
+      "operator_name": "Orbital Foundry",
+      "tle_name": "PHISAT 2",
+      "color": "#ffb347",
+      "service_port": 7001,
+      "capability": {
+        "type": "compute",
+        "models": [
+          "fire-detector-v1"
+        ],
+        "max_input_mb": 400,
+        "max_compute_s": 120,
+        "power_budget_wh": 100,
+        "job_power_wh": 28,
+        "modeled_compute_s": 45,
+        "price_base_usd": 1.5,
+        "price_per_compute_s": 0.01,
+        "scarcity_alpha": 1.0
+      }
+    },
+    {
+      "node_id": "EDRS-C",
+      "role": "relay",
+      "operator_id": "lumen-relay",
+      "operator_name": "Lumen Relay Co",
+      "tle_name": "EDRS-C",
+      "color": "#a78bfa",
+      "service_port": 7002,
+      "capability": {
+        "type": "relay",
+        "max_payload_mb": 500,
+        "price_per_mb": 0.02,
+        "price_min_usd": 0.5,
+        "scarcity_alpha": 0.5
+      }
+    },
+    {
+      "node_id": "STARLINK-3005",
+      "role": "relay",
+      "operator_id": "northstar-relay",
+      "operator_name": "Northstar Relay (joins late)",
+      "tle_name": "STARLINK-3005",
+      "color": "#34d399",
+      "service_port": 7003,
+      "joins_late": true,
+      "capability": {
+        "type": "relay",
+        "max_payload_mb": 200,
+        "price_per_mb": 0.03,
+        "price_min_usd": 0.5,
+        "scarcity_alpha": 0.5
+      }
+    }
+  ],
+  "ground_stations": [
+    {
+      "gs_id": "GS-SVALBARD",
+      "name": "Svalbard (KSAT)",
+      "lat": 78.23,
+      "lon": 15.39
+    },
+    {
+      "gs_id": "GS-PUNTA-ARENAS",
+      "name": "Punta Arenas",
+      "lat": -53.0,
+      "lon": -70.9
+    },
+    {
+      "gs_id": "GS-OREGON",
+      "name": "Oregon (AWS Ground Station)",
+      "lat": 45.6,
+      "lon": -121.2
+    },
+    {
+      "gs_id": "GS-SINGAPORE",
+      "name": "Singapore",
+      "lat": 1.35,
+      "lon": 103.8
+    }
+  ],
+  "windows": [
+    {
+      "window_id": "w_A_GS_own",
+      "from": "SENTINEL-2A",
+      "to": "GS-SVALBARD",
+      "start": 1500,
+      "end": 1620,
+      "bandwidth_mbps": 300,
+      "kind": "downlink",
+      "note": "A's own next ground pass \u2014 too late"
+    },
+    {
+      "window_id": "w_A_B_1",
+      "from": "SENTINEL-2A",
+      "to": "PHISAT-2",
+      "start": 60,
+      "end": 150,
+      "bandwidth_mbps": 100,
+      "kind": "crosslink"
+    },
+    {
+      "window_id": "w_A_C_1",
+      "from": "SENTINEL-2A",
+      "to": "EDRS-C",
+      "start": 40,
+      "end": 80,
+      "bandwidth_mbps": 25,
+      "kind": "crosslink",
+      "note": "only 125 MB fits \u2014 raw relay impossible"
+    },
+    {
+      "window_id": "w_B_C_1",
+      "from": "PHISAT-2",
+      "to": "EDRS-C",
+      "start": 200,
+      "end": 260,
+      "bandwidth_mbps": 20,
+      "kind": "crosslink"
+    },
+    {
+      "window_id": "w_C_GS_1",
+      "from": "EDRS-C",
+      "to": "GS-PUNTA-ARENAS",
+      "start": 300,
+      "end": 360,
+      "bandwidth_mbps": 50,
+      "kind": "downlink"
+    },
+    {
+      "window_id": "w_B_D_1",
+      "from": "PHISAT-2",
+      "to": "STARLINK-3005",
+      "start": 380,
+      "end": 420,
+      "bandwidth_mbps": 40,
+      "kind": "crosslink"
+    },
+    {
+      "window_id": "w_D_GS_1",
+      "from": "STARLINK-3005",
+      "to": "GS-OREGON",
+      "start": 430,
+      "end": 480,
+      "bandwidth_mbps": 80,
+      "kind": "downlink"
+    },
+    {
+      "window_id": "w_B_GS_1",
+      "from": "PHISAT-2",
+      "to": "GS-SINGAPORE",
+      "start": 900,
+      "end": 960,
+      "bandwidth_mbps": 60,
+      "kind": "downlink",
+      "note": "B's own pass \u2014 after deadline"
+    }
+  ],
+  "disruptions": [
+    {
+      "id": "withdraw_c_at_commit",
+      "label": "E1: Lumen Relay withdraws capacity at commit",
+      "type": "competing_reserve",
+      "node_id": "EDRS-C",
+      "fraction": 0,
+      "fail_next_hold": true,
+      "hint": "Press BEFORE the buyer reserves. The relay hold fails, the compute hold is released, $0 moves."
+    },
+    {
+      "id": "kill_c_downlink",
+      "label": "E2: Ground station outage at Punta Arenas",
+      "type": "kill_link",
+      "window_id": "w_C_GS_1",
+      "suggested_sim_t": 280,
+      "hint": "Press after compute finished. Result preserved, relay grant refunded, replan."
+    },
+    {
+      "id": "launch_provider_d",
+      "label": "New provider Northstar Relay comes online",
+      "type": "launch_provider",
+      "node_id": "STARLINK-3005",
+      "hint": "Boots from snapshot, self-registers, gets discovered and paid mid-mission."
+    },
+    {
+      "id": "competing_mission",
+      "label": "Competing mission takes 60% of PHISAT-2",
+      "type": "competing_reserve",
+      "node_id": "PHISAT-2",
+      "fraction": 0.6,
+      "hint": "Scarcity pricing: compute quote rises."
+    },
+    {
+      "id": "restore_c_downlink",
+      "label": "Restore Punta Arenas link",
+      "type": "restore_link",
+      "window_id": "w_C_GS_1"
+    },
+    {
+      "id": "revoke_c",
+      "label": "Lumen Relay revokes unfulfilled grants",
+      "type": "revoke",
+      "node_id": "EDRS-C"
+    }
+  ],
+  "expected_story": {
+    "plan_own_downlink": {
+      "delivery_sim_t": 1620,
+      "cost": 0,
+      "feasible": false,
+      "reason": "after deadline"
+    },
+    "plan_raw_relay_C": {
+      "feasible": false,
+      "reason": "180 MB does not fit w_A_C_1 (125 MB in 40 s at 25 Mbps)"
+    },
+    "plan_compute_B_relay_C": {
+      "delivery_sim_t": 312,
+      "cost": "~$2.45",
+      "feasible": true
+    },
+    "after_kill_c": {
+      "replan": "PHISAT-2 -> STARLINK-3005 -> GS-OREGON",
+      "delivery_sim_t": 436,
+      "requires": "provider D online"
+    }
+  }
+}

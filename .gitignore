@@ -1,0 +1,16 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+dist/
+.env
+.env.*
+!.env.example
+keys/*.json
+sim/.cache/
+.mcp-use/
+*.log
+.DS_Store
+.logs/
+packages/operator/state/
+sim/.venv/

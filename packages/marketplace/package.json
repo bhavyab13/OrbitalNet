@@ -1,0 +1,48 @@
+{
+  "name": "marketplace",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "version": "1.0.0",
+  "description": "an mcp-use server with React views for MCP Apps",
+  "author": "mcp-use",
+  "license": "MIT",
+  "homepage": "https://github.com/mcp-use/mcp-use",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "chatgpt plugins",
+    "claude connector",
+    "mcp-app",
+    "mcp-use",
+    "manufact"
+  ],
+  "scripts": {
+    "build": "mcp-use build",
+    "dev": "mcp-use dev",
+    "start": "mcp-use start",
+    "deploy": "mcp-use deploy",
+    "typecheck": "mcp-use typecheck",
+    "prepare-assets": "cp ../../docs/PROTOCOL.md ./PROTOCOL.md && cp ../../data/scenario.json ./scenario.json",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@noble/ed25519": "^3.2.0",
+    "dotenv": "^18.0.8",
+    "mcp-use": "2.10.1",
+    "mppx": "^0.13.5",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "viem": "^2.57.7",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,397 @@
+{
+  "n": 100,
+  "seed": 1,
+  "elapsed_s": 0.18113207817077637,
+  "cells": [
+    {
+      "p_fail": 0.0,
+      "p_withdraw": 0.0,
+      "independent": {
+        "completion": 1.0,
+        "completion_ci": [
+          1.0,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.6139660000000005
+      },
+      "ocgp": {
+        "completion": 1.0,
+        "completion_ci": [
+          1.0,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.6139660000000005
+      },
+      "omniscient": {
+        "completion": 1.0,
+        "completion_ci": [
+          1.0,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.5807529999999996
+      },
+      "paired_B_minus_A": {
+        "wasted_saved": 0.0,
+        "wasted_saved_ci": [
+          0.0,
+          0.0
+        ],
+        "completion_gain": 0.0,
+        "completion_gain_ci": [
+          0.0,
+          0.0
+        ],
+        "completion_gap_to_omniscient": 0.0
+      }
+    },
+    {
+      "p_fail": 0.0,
+      "p_withdraw": 0.2,
+      "independent": {
+        "completion": 1.0,
+        "completion_ci": [
+          1.0,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.607076
+      },
+      "ocgp": {
+        "completion": 1.0,
+        "completion_ci": [
+          1.0,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.607076
+      },
+      "omniscient": {
+        "completion": 1.0,
+        "completion_ci": [
+          1.0,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.559853
+      },
+      "paired_B_minus_A": {
+        "wasted_saved": 0.0,
+        "wasted_saved_ci": [
+          0.0,
+          0.0
+        ],
+        "completion_gain": 0.0,
+        "completion_gain_ci": [
+          0.0,
+          0.0
+        ],
+        "completion_gap_to_omniscient": 0.0
+      }
+    },
+    {
+      "p_fail": 0.2,
+      "p_withdraw": 0.0,
+      "independent": {
+        "completion": 0.98,
+        "completion_ci": [
+          0.95,
+          1.0
+        ],
+        "wasted": 0.031389,
+        "wasted_ci": [
+          0.009958025,
+          0.05838249999999998
+        ],
+        "stranded": 0.06,
+        "rejected_ops": 6,
+        "replan_latency": 97.18273260906625,
+        "paid": 2.583048
+      },
+      "ocgp": {
+        "completion": 0.98,
+        "completion_ci": [
+          0.95,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": 97.18273260906625,
+        "paid": 2.551659
+      },
+      "omniscient": {
+        "completion": 0.98,
+        "completion_ci": [
+          0.95,
+          1.0
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.472808
+      },
+      "paired_B_minus_A": {
+        "wasted_saved": 0.031389,
+        "wasted_saved_ci": [
+          0.009958025,
+          0.05838249999999998
+        ],
+        "completion_gain": 0.0,
+        "completion_gain_ci": [
+          0.0,
+          0.0
+        ],
+        "completion_gap_to_omniscient": 0.0
+      }
+    },
+    {
+      "p_fail": 0.2,
+      "p_withdraw": 0.2,
+      "independent": {
+        "completion": 0.95,
+        "completion_ci": [
+          0.91,
+          0.99
+        ],
+        "wasted": 0.037804000000000004,
+        "wasted_ci": [
+          0.012263000000000001,
+          0.06746867499999998
+        ],
+        "stranded": 0.07,
+        "rejected_ops": 7,
+        "replan_latency": 279.4512185238891,
+        "paid": 2.6179530000000004
+      },
+      "ocgp": {
+        "completion": 0.96,
+        "completion_ci": [
+          0.92,
+          0.99
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": 202.150560399312,
+        "paid": 2.5881090000000007
+      },
+      "omniscient": {
+        "completion": 0.96,
+        "completion_ci": [
+          0.92,
+          0.99
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.4712739999999997
+      },
+      "paired_B_minus_A": {
+        "wasted_saved": 0.037804000000000004,
+        "wasted_saved_ci": [
+          0.012263000000000001,
+          0.06746867499999998
+        ],
+        "completion_gain": 0.01,
+        "completion_gain_ci": [
+          0.0,
+          0.03
+        ],
+        "completion_gap_to_omniscient": 0.0
+      }
+    },
+    {
+      "p_fail": 0.4,
+      "p_withdraw": 0.0,
+      "independent": {
+        "completion": 0.92,
+        "completion_ci": [
+          0.87,
+          0.97
+        ],
+        "wasted": 0.08886000000000001,
+        "wasted_ci": [
+          0.051987725,
+          0.129492875
+        ],
+        "stranded": 0.17,
+        "rejected_ops": 17,
+        "replan_latency": 210.28379637562958,
+        "paid": 2.634235
+      },
+      "ocgp": {
+        "completion": 0.92,
+        "completion_ci": [
+          0.87,
+          0.97
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": 210.28379637562958,
+        "paid": 2.5453750000000004
+      },
+      "omniscient": {
+        "completion": 0.92,
+        "completion_ci": [
+          0.87,
+          0.97
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.338296
+      },
+      "paired_B_minus_A": {
+        "wasted_saved": 0.08886000000000001,
+        "wasted_saved_ci": [
+          0.051987725,
+          0.129492875
+        ],
+        "completion_gain": 0.0,
+        "completion_gain_ci": [
+          0.0,
+          0.0
+        ],
+        "completion_gap_to_omniscient": 0.0
+      }
+    },
+    {
+      "p_fail": 0.4,
+      "p_withdraw": 0.2,
+      "independent": {
+        "completion": 0.87,
+        "completion_ci": [
+          0.8,
+          0.93
+        ],
+        "wasted": 0.151579,
+        "wasted_ci": [
+          0.103614225,
+          0.20521209999999995
+        ],
+        "stranded": 0.27,
+        "rejected_ops": 27,
+        "replan_latency": 147.9763268849817,
+        "paid": 2.69601
+      },
+      "ocgp": {
+        "completion": 0.88,
+        "completion_ci": [
+          0.81,
+          0.94
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": 155.3260561946375,
+        "paid": 2.5488659999999994
+      },
+      "omniscient": {
+        "completion": 0.87,
+        "completion_ci": [
+          0.8,
+          0.93
+        ],
+        "wasted": 0.0,
+        "wasted_ci": [
+          0.0,
+          0.0
+        ],
+        "stranded": 0.0,
+        "rejected_ops": 0,
+        "replan_latency": null,
+        "paid": 2.2009959999999995
+      },
+      "paired_B_minus_A": {
+        "wasted_saved": 0.151579,
+        "wasted_saved_ci": [
+          0.103614225,
+          0.20521209999999995
+        ],
+        "completion_gain": 0.01,
+        "completion_gain_ci": [
+          0.0,
+          0.03
+        ],
+        "completion_gap_to_omniscient": -0.010000000000000009
+      }
+    }
+  ]
+}
