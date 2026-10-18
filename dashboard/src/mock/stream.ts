@@ -99,6 +99,7 @@ function script(): Step[] {
   const say = (t: number, act: string, text: string) => S.push({ t, ev: { type: 'narration', act, text } })
   S.push({ t: 0, ev: { type: 'narration', act: 'Act 1 — A mission arrives', text: `Emergency ops requests: "${M.text}"` } })
   S.push({ t: 2, ev: { type: 'mission_created', mission_id: M.mission_id } })
+  S.push({ t: 3, ev: { type: 'mcp_client_call', client: 'claude-desktop/1.0', tool: 'plan_mission' } })
   say(6, 'Act 1 — Impossible alone', 'SENTINEL-2A has the scene but cannot process it onboard (≈400 s on 0.3 TOPS) and its next ground pass over Svalbard is T+1500s — after the T+720s deadline.')
   S.push({ t: 10, ev: { type: 'plans', plans: PLANS.slice(0, 1) } })
   say(12, 'Act 2 — Discovery', 'Buyer agent calls discover_providers on the OrbitalNet marketplace. Two signed manifests verified: Orbital Foundry (PHISAT-2, compute) and Lumen Relay (EDRS-C, relay).')
@@ -124,7 +125,7 @@ function script(): Step[] {
   S.push({ t: 75, ev: { type: 'leg_done', leg_index: 0, kind: 'transfer', window_id: 'w_A_B_1', attestation: { attestation_id: 'a_tr_01', node_id: 'PHISAT-2', op: 'receive', input_bytes: 188743680 } } })
   S.push({ t: 76, ev: { type: 'leg_start', leg_index: 1, kind: 'compute', node: 'PHISAT-2', op: 'image-inference' } })
   say(78, 'Act 3 — Grant verified offline', 'PHISAT-2 checks the Grant signature (its own key), the World Assertion (sim key), window, scope, byte limits — then runs fire-detector-v1 on the real VIIRS scene.')
-  S.push({ t: 121, ev: { type: 'leg_done', leg_index: 1, kind: 'compute', node: 'PHISAT-2', power_budget_wh: 100, attestation: { attestation_id: 'a_c_7f3a', node_id: 'PHISAT-2', op: 'image-inference', input_bytes: 188743680, output_bytes: 41210, compute_s: 38.2, power_wh: 28.4 } } })
+  S.push({ t: 121, ev: { type: 'leg_done', leg_index: 1, kind: 'compute', node: 'PHISAT-2', power_budget_wh: 100, attestation: { attestation_id: 'a_c_7f3a', grant_id: 'g_7f3a1c9e', node_id: 'PHISAT-2', op: 'image-inference', input_bytes: 188743680, output_bytes: 41210, compute_s: 38.2, power_wh: 28.4 } } })
   S.push({ t: 122, ev: { type: 'result', result: buildResult() } })
   S.push({ t: 150, ev: { type: 'window_close', window_id: 'w_A_B_1' } })
   say(125, 'Act 3 — Attestation', 'A signed Usage Attestation returns: 180 MB in, 41 KB out, 38.2 s compute, 28.4 Wh. Paid, authorised, done — the audit triple agrees.')
@@ -143,7 +144,7 @@ function script(): Step[] {
   S.push({ t: 288, ev: { type: 'plans', plans: REPLAN.slice(1) } })
   say(290, 'Act 4 — No path', 'Replan from PHISAT-2: its only own pass is T+900s. Right now there is no deadline-feasible path. The protocol will say INFEASIBLE rather than invent a delivery…')
   say(300, 'Act 5 — A stranger joins', 'Judge launches a brand-new provider. Northstar Relay boots from a snapshot, generates its key, publishes a signed manifest at /.well-known/ocgp.json and registers itself.')
-  S.push({ t: 304, ev: { type: 'provider_online', node_id: 'STARLINK-3005', operator_id: 'northstar-relay', operator_name: 'Northstar Relay', manifest_url: 'http://localhost:7003/.well-known/ocgp.json' } })
+  S.push({ t: 304, ev: { type: 'provider_online', node_id: 'STARLINK-3005', operator_id: 'northstar-relay', operator_name: 'Northstar Relay', late: true, base_url: 'https://7003-agqu6xuufihmjk27jkjrx2n4ia.instabox.tech', manifest_url: 'https://7003-agqu6xuufihmjk27jkjrx2n4ia.instabox.tech/.well-known/ocgp.json' } })
   say(308, 'Act 5 — Zero-integration onboarding', 'The buyer has never seen Northstar. From the manifest alone it quotes, holds, pays and receives a Grant — no SDK, no adapter.')
   S.push({ t: 310, ev: { type: 'quote', node_id: 'STARLINK-3005', price_usd: 0.5 } })
   S.push({ t: 312, ev: { type: 'plans', plans: REPLAN } })
@@ -160,7 +161,7 @@ function script(): Step[] {
   S.push({ t: 430, ev: { type: 'window_open', window_id: 'w_D_GS_1' } })
   S.push({ t: 430, ev: { type: 'leg_start', leg_index: 1, kind: 'transfer', from: 'STARLINK-3005', to: 'GS-OREGON', window_id: 'w_D_GS_1' } })
   S.push({ t: 432, ev: { type: 'transfer_progress', window_id: 'w_D_GS_1', from: 'STARLINK-3005', to: 'GS-OREGON', bytes_moved_mb: 0.04, bytes_total_mb: 0.04, pct: 100 } })
-  S.push({ t: 434, ev: { type: 'leg_done', leg_index: 1, kind: 'transfer', window_id: 'w_D_GS_1', attestation: { attestation_id: 'a_tr_04', node_id: 'STARLINK-3005', op: 'transmit', output_bytes: 41210 } } })
+  S.push({ t: 434, ev: { type: 'leg_done', leg_index: 1, kind: 'transfer', window_id: 'w_D_GS_1', to: 'GS-OREGON', attestation: { attestation_id: 'a_tr_04', grant_id: 'g_e51c0a3b', node_id: 'STARLINK-3005', op: 'transmit', output_bytes: 41210 } } })
   S.push({ t: 436, ev: () => ({ type: 'delivered', to: 'GS-OREGON', result: buildResult() }) })
   say(437, 'Delivered', 'Fire-perimeter assessment on the ground at T+436s, 284 s before deadline, $2.45 spent across three independent operators — all verifiable: receipts, grants, attestations.')
   S.push({ t: 480, ev: { type: 'window_close', window_id: 'w_D_GS_1' } })
@@ -215,7 +216,8 @@ export function startMock() {
   }
   const timer = setInterval(loop, 50)
 
-  // mock clock control hooks
+  // mock clock control hooks (+ a direct emitter used by the screenshot harness)
+  ;(window as any).__mockEmit = (ev: SimEvent) => useStore.getState().applyEvent({ ...ev, sim_t: Math.floor(simT) })
   ;(window as any).__mockClock = {
     pause: () => useStore.setState({ paused: true }),
     resume: () => useStore.setState({ paused: false }),
@@ -225,7 +227,7 @@ export function startMock() {
       // only a couple of disruptions are meaningful in mock: kill/restore link
       const s = useStore.getState()
       if (type === 'kill_link' && body.window_id) s.applyEvent({ type: 'link_killed', sim_t: Math.floor(simT), window_id: body.window_id, reason: body.label ?? 'judge' })
-      if (type === 'launch_provider' && body.node_id) s.applyEvent({ type: 'provider_online', sim_t: Math.floor(simT), node_id: body.node_id, operator_name: 'Northstar Relay' })
+      if (type === 'launch_provider' && body.node_id) s.applyEvent({ type: 'provider_online', sim_t: Math.floor(simT), node_id: body.node_id, operator_name: 'Northstar Relay', late: true, base_url: 'https://7003-agqu6xuufihmjk27jkjrx2n4ia.instabox.tech' })
       if (type === 'competing_reserve' && body.node_id) s.applyEvent({ type: 'capacity', sim_t: Math.floor(simT), node_id: body.node_id, capacity_pct: 40, price_usd: 3.4, label: 'competing mission took 60% capacity' })
       if (type === 'revoke' && body.node_id) s.applyEvent({ type: 'grant_revoked', sim_t: Math.floor(simT), node_id: body.node_id, operator_id: body.node_id, reason: 'operator revoked unfulfilled capacity' })
     },

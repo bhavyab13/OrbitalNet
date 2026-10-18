@@ -40,16 +40,16 @@ export function PaymentTicker() {
         <div className="flex flex-col gap-1.5 max-h-[150px] scroll">
           {payments.map((p) => {
             const n = nodeMeta[p.operator_id]
-            const href = p.method === 'tempo' && p.receipt_ref?.startsWith('0x') ? EXPLORER_TX_URL + p.receipt_ref : undefined
+            const href = (p.method === 'tempo' || p.method === 'mpp-session') && p.receipt_ref?.startsWith('0x') ? EXPLORER_TX_URL + p.receipt_ref : undefined
             return (
               <div key={p.id} className="flex items-center gap-2 text-[11px] slide-in">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: n?.color ?? '#9ad' }} />
                 <span className="num text-dim text-[10px]">{fmtT(p.sim_t)}</span>
                 <span className="truncate" style={{ color: n?.color }}>{n?.operator_name?.replace(/ \(.*\)/, '') ?? p.operator_id}</span>
                 <span className="flex-1" />
-                <span className="font-mono text-[9px] px-1 rounded border border-line text-dim uppercase">{p.method}</span>
-                {href ? <a className="num text-[10px] text-accent/80 hover:text-accent" href={href} target="_blank" rel="noreferrer">{p.receipt_ref.slice(0, 8)}…</a> : <span className="num text-[10px] text-dim">{p.receipt_ref.slice(0, 10)}</span>}
-                <span className="num text-ok">${p.amount_usd.toFixed(2)}</span>
+                <span className={`font-mono text-[9px] px-1 rounded border uppercase ${p.metered && !p.settled ? 'border-accent/60 text-accent pulse' : 'border-line text-dim'}`}>{p.metered ? (p.settled ? 'session · settled' : 'session · metering') : p.method}</span>
+                {p.metered && !p.settled ? <span className="num text-[10px] text-dim">{p.units ?? 0}/{p.units_total ?? '?'} × 100KB</span> : href ? <a className="num text-[10px] text-accent/80 hover:text-accent" href={href} target="_blank" rel="noreferrer">{p.receipt_ref.slice(0, 8)}…</a> : <span className="num text-[10px] text-dim">{p.receipt_ref.slice(0, 10)}</span>}
+                <span className={`num ${p.metered && !p.settled ? 'text-accent' : 'text-ok'}`}>{p.metered ? `$${p.amount_usd.toFixed(4)}` : `$${p.amount_usd.toFixed(2)}`}</span>
               </div>
             )
           })}

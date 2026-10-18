@@ -12,4 +12,5 @@ for p in 8000 7001 7002 7003; do
   if grep -q "^$key=" .env; then sed -i '' "s|^$key=.*|$key=$url|" .env; else echo "$key=$url" >> .env; fi
   echo "$key=$url"
 done
+sim=$(grep "^PUBLIC_URL_SIM=" .env | cut -d= -f2); if grep -q "^SIM_PUBLIC_URL=" .env; then sed -i "" "s|^SIM_PUBLIC_URL=.*|SIM_PUBLIC_URL=$sim|" .env; else echo "SIM_PUBLIC_URL=$sim" >> .env; fi
 echo "Now: restart operators (they advertise PUBLIC_URL) and update the Manufact env: SIM_URL + REGISTRY_SEED."

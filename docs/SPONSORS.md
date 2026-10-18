@@ -22,7 +22,10 @@ Claude Code: `claude mcp add --transport http orbitalnet https://calm-wave-z8g51
 4. `npx -y mcp-use@latest deploy --no-github -y` → set env vars in the Manufact dashboard: `SIM_URL`, `REGISTRY_SEED`, `MPPX_PRIVATE_KEY`, `PAY_RAIL`.
 5. Copy the MCP URL; add it to Claude Desktop (Settings → Connectors) so a judge can type "run the Papua fire mission" and watch the MCP App widget render. Tell the Manufact folks you used MCP Apps + the `ocgp://protocol` resource for self-onboarding.
 
-## 3. InstaBox (track: best use of agent computers) — 10 min
+## 3. InstaBox (track: best use of agent computers) — DONE 2026-10-18
+Boxes (account bhavyab13): `orbital-foundry` (PHISAT-2 compute, https://7001-agqu6w7vgunkts2l5yop63jie4.instabox.tech), `lumen-relay` (EDRS-C relay, https://7002-agqu6xts2sw3yul4iq7yfow2wq.instabox.tech), `northstar-relay` (STARLINK-3005, https://7003-agqu6xuufihmjk27jkjrx2n4ia.instabox.tech, **kept idle**: the judge's "new provider" button runs `instabox ssh northstar-relay -- /data/workspace/run-operator.sh starlink <url>` via the sim's LAUNCH_CMD). Snapshot `orbitalnet-operator` has repo+deps+keys+.env.
+Before the demo: `instabox ls` (wake paused boxes with `instabox wake <box>`), then `instabox ssh orbital-foundry -- '/data/workspace/run-operator.sh phisat <url>'` and the same for `lumen-relay … edrs <url>` (boxes auto-pause after 30 idle min; a public-port request wakes them but the operator process must be restarted after a pause). Show the InstaBox console on the second screen when Northstar boots.
+Original setup steps for reference:
 Invitation code **556677** (from the stage). Default 4 vCPU / 8 GB, up to 5 machines (ask them to raise it).
 1. `npx instabox@latest` → sign in, enter the code.
 2. Follow `packages/operator/deploy-instabox.md`: create box `orbital-foundry`, clone/copy the repo, `npm i`, run the compute operator with `PUBLIC_URL=<box public url>`; expose port 7001 publicly. Snapshot it.

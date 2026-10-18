@@ -11,6 +11,8 @@ import { AuditFeed, Narration, PaymentTicker } from './components/RightColumn'
 import ResultOverlay from './components/ResultOverlay'
 import StoryStrip from './components/StoryStrip'
 import Judge from './components/Judge'
+import SponsorStamps from './components/SponsorStamps'
+import Provenance from './components/Provenance'
 
 class Boundary extends Component<{ children: ReactNode; label: string }, { err?: string }> {
   state = { err: undefined as string | undefined }
@@ -33,7 +35,21 @@ function ControlRoom() {
           <Boundary label="plans"><PlanTable /></Boundary>
           <Boundary label="providers"><ProviderCards /></Boundary>
         </div>
-        <div />
+        <div className="relative min-h-0">
+          <div className="absolute top-0 right-0"><Boundary label="sponsors"><SponsorStamps /></Boundary></div>
+          <div className="absolute bottom-0 left-0 right-0 flex items-end justify-between gap-3">
+            <Boundary label="provenance"><Provenance /></Boundary>
+            <div className="panel px-3 py-1.5 text-[10px] font-mono text-dim leading-4 pointer-events-none whitespace-nowrap flex gap-3">
+              <span className="hidden 2xl:inline"><i className="inline-block w-4 border-t-2 border-dashed border-[#8caad2]/40 align-middle mr-1" />future</span>
+              <span><i className="inline-block w-4 border-t-2 border-[#4fd1ff] align-middle mr-1" />open link</span>
+              <span className="hidden 2xl:inline"><i className="inline-block w-4 border-t-2 border-dotted border-[#f87171] align-middle mr-1" />killed</span>
+              <span><i className="inline-block w-2.5 h-2.5 rounded-full border border-[#a78bfa] align-middle mr-1" />grant</span>
+              <span><i className="inline-block w-2.5 h-2.5 rounded-full border border-[#34d399] align-middle mr-1" />fulfilled</span>
+              <span><i className="inline-block w-2 h-2 rounded-full bg-[#ffd166] align-middle mr-1" />money</span>
+              <span className="hidden 2xl:inline"><i className="inline-block w-2 h-2 rounded-full bg-[#ff8c42] align-middle mr-1" />fire</span>
+            </div>
+          </div>
+        </div>
         <div className="flex flex-col gap-3 min-h-0 overflow-hidden pointer-events-auto">
           <Boundary label="narration"><Narration /></Boundary>
           <Boundary label="payments"><PaymentTicker /></Boundary>

@@ -162,15 +162,54 @@ class Runner:
                         payload = base64.b64encode(json.dumps(m.get("result") or {"note": "raw scene"}).encode()).decode()
                         body = {"grant": grant, "world_assertion": w.assertion(leg["window_id"]), "payload_b64": payload, "mission_id": mission_id,
                                 "bytes_mb": leg["bytes_mb"]}
-                        w.emit({"type": "fulfilment_request", "mission_id": mission_id, "op": "transmit", "node_id": leg["from"], "grant_id": grant.get("grant_id"), "leg": idx})
-                        code, data = await self._post(f"{url}/transmit", body)
-                        if code != 200:
-                            leg["status"] = "FAILED"; leg["fail_reason"] = data.get("reason") or data.get("error") or f"http {code}"
-                            w.emit({"type": "grant_rejected", "mission_id": mission_id, "node_id": leg["from"], "grant_id": grant.get("grant_id"), "reason": leg["fail_reason"], "detail": data, "leg": idx})
-                            w.narrate("disruption", f"{leg['from']} refused the transmit grant: {leg['fail_reason']}. Replanning.", mission_id)
-                            self._set(m, "REPLAN_REQUIRED", reason=leg["fail_reason"]); return
-                        leg["attestation"] = data.get("attestation")
-                    ok = await self._move_bytes(m, leg, stop)
+                        if config.METERED_RELAY:
+                            # OCGP §2.10: the broker carries the bytes as a metered MPP session (pay per 100 KB as they flow);
+                            # the relay still verifies the grant + world assertion offline before the first metered unit.
+                            w.emit({"type": "fulfilment_request", "mission_id": mission_id, "op": "transmit/stream", "node_id": leg["from"], "grant_id": grant.get("grant_id"), "leg": idx, "metered": True})
+                            w.emit({"type": "leg_start", "mission_id": mission_id, "leg": leg, "window_id": leg["window_id"], "metered": True})
+                            w.narrate("executing", f"{leg['from']} → {leg['to']}: opening a metered MPP session, paying per 100 KB as {float(leg['bytes_mb']):.3f} MB flow.", mission_id)
+                            sbody = {"mission_id": mission_id, "operator_id": leg.get("operator_id") or (from_node or {}).get("operator_id"), "grant": grant,
+                                     "world_assertion": body["world_assertion"], "payload_b64": payload, "bytes_mb": leg["bytes_mb"], "base_url": url}
+                            code, data = await self._post(f"{config.BROKER_URL}/transfer/stream", sbody, timeout=180)
+                            if stop.is_set():
+                                return
+                            reason_txt = str(data.get("reason") or data.get("error") or "")
+                            if (code != 200 or not data.get("ok")) and ("404" in reason_txt or "not-a-relay" in reason_txt or code == 0):
+                                # Relay (or broker) predates metered sessions: fall back to the one-shot /transmit fulfilment.
+                                w.narrate("executing", f"{leg['from']} offers no metered session endpoint; falling back to one-shot transmit.", mission_id)
+                                code, data = await self._post(f"{url}/transmit", body)
+                                if code == 200:
+                                    data = {"ok": True, "attestation": data.get("attestation"), "metered_usd": 0}
+                                    ok_legacy = await self._move_bytes(m, leg, stop)
+                                    if not ok_legacy:
+                                        reason = leg.get("fail_reason", "transfer failed")
+                                        self._set(m, "REPLAN_REQUIRED", reason=reason); return
+                            if code != 200 or not data.get("ok"):
+                                leg["status"] = "FAILED"; leg["fail_reason"] = data.get("reason") or data.get("error") or f"http {code}"
+                                w.emit({"type": "grant_rejected", "mission_id": mission_id, "node_id": leg["from"], "grant_id": grant.get("grant_id"), "reason": leg["fail_reason"], "detail": data, "leg": idx})
+                                w.narrate("disruption", f"{leg['from']} refused the metered transmit: {leg['fail_reason']}. Replanning.", mission_id)
+                                self._set(m, "REPLAN_REQUIRED", reason=leg["fail_reason"]); return
+                            if leg["window_id"] in w.killed or w.sim_t > win["end"]:
+                                leg["status"] = "FAILED"; leg["fail_reason"] = "link_killed" if leg["window_id"] in w.killed else "window_closed"
+                                w.emit({"type": "leg_failed", "mission_id": mission_id, "leg": leg, "reason": leg["fail_reason"]})
+                                self._set(m, "REPLAN_REQUIRED", reason=leg["fail_reason"]); return
+                            leg["attestation"] = data.get("attestation")
+                            leg["metered_usd"] = data.get("metered_usd"); leg["bytes_moved_mb"] = float(leg["bytes_mb"])
+                            m["total_paid_usd"] = round(float(m.get("total_paid_usd") or 0) + float(data.get("metered_usd") or 0), 6)
+                            w.moved_mb[leg["window_id"]] = w.moved_mb.get(leg["window_id"], 0.0) + float(leg["bytes_mb"])
+                            ok = True
+                        else:
+                            w.emit({"type": "fulfilment_request", "mission_id": mission_id, "op": "transmit", "node_id": leg["from"], "grant_id": grant.get("grant_id"), "leg": idx})
+                            code, data = await self._post(f"{url}/transmit", body)
+                            if code != 200:
+                                leg["status"] = "FAILED"; leg["fail_reason"] = data.get("reason") or data.get("error") or f"http {code}"
+                                w.emit({"type": "grant_rejected", "mission_id": mission_id, "node_id": leg["from"], "grant_id": grant.get("grant_id"), "reason": leg["fail_reason"], "detail": data, "leg": idx})
+                                w.narrate("disruption", f"{leg['from']} refused the transmit grant: {leg['fail_reason']}. Replanning.", mission_id)
+                                self._set(m, "REPLAN_REQUIRED", reason=leg["fail_reason"]); return
+                            leg["attestation"] = data.get("attestation")
+                            ok = await self._move_bytes(m, leg, stop)
+                    else:
+                        ok = await self._move_bytes(m, leg, stop)
                     if stop.is_set():
                         return
                     if not ok:

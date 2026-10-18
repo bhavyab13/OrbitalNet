@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import GlobeGL, { type GlobeMethods } from 'react-globe.gl'
 import * as THREE from 'three'
 import { useStore } from '../store'
+import { useFx, BUYER_ID, BUYER_POS, GOLD, fxNow } from '../fx'
+import { startFxLayer } from './FxLayer'
 import type { ContactWindow, NodeLive, Position } from '../types'
 
 const R = 6371
@@ -84,9 +86,17 @@ export default function Globe() {
   const focusLink = useStore((s) => s.focusLink)
   const currentLeg = useStore((s) => s.currentLegIndex)
   const plans = useStore((s) => s.plans)
+  const cue = useFx((s) => s.cue)
+  const bursts = useFx((s) => s.bursts)
+  const resultGeo = useFx((s) => s.resultGeo)
+  const posRef = useRef<Record<string, Position>>({})
+  const lastUserDrag = useRef(0)
+  const [ready, setReady] = useState(false)
 
   const gsMap = useMemo(() => Object.fromEntries((scenario?.ground_stations ?? []).map((g) => [g.gs_id, g])), [scenario])
   const nodeMeta = useMemo(() => Object.fromEntries((scenario?.nodes ?? []).map((n) => [n.node_id, n])), [scenario])
+  const nodeMetaRef = useRef(nodeMeta)
+  nodeMetaRef.current = nodeMeta
 
   // Resolve current positions (interpolated along trails in live mode)
   const pos = useMemo(() => {
@@ -96,6 +106,8 @@ export default function Globe() {
       if (p) out[id] = p
     }
     for (const [id, g] of Object.entries(gsMap)) out[id] = { lat: g.lat, lon: g.lon, alt_km: 0 }
+    out[BUYER_ID] = BUYER_POS
+    posRef.current = out
     return out
   }, [nodes, simT, gsMap])
 
@@ -125,15 +137,32 @@ export default function Globe() {
     return arr
   }, [nodes, pos, transfers, nodeMeta, activeNodes])
 
-  // Orbit trails
+  // Orbit trails + delivered result outlines (fire perimeters projected onto the planet)
   const paths = useMemo(() => {
     const arr: any[] = []
     for (const [id, n] of Object.entries(nodes)) {
       if (!n.trail || n.trail.length < 2) continue
-      arr.push({ id, color: nodeMeta[id]?.color ?? '#9ad', online: n.online, pts: n.trail.map((p) => [p[0], p[1], dispAlt(p[2])]) })
+      arr.push({ id, color: nodeMeta[id]?.color ?? '#9ad', online: n.online, pts: n.trail.map((p) => [p[0], p[1], dispAlt(p[2])]), stroke: 0.5, dash: 0.02, gap: 0.01, anim: 12000 })
+    }
+    if (resultGeo) {
+      const polys = resultGeo.features.filter((f) => f?.geometry?.type === 'Polygon' || f?.geometry?.type === 'MultiPolygon')
+      let i = 0
+      for (const f of polys) {
+        const rings: number[][][] = f.geometry.type === 'Polygon' ? [f.geometry.coordinates[0]] : f.geometry.coordinates.map((pg: number[][][]) => pg[0])
+        for (const ring of rings) arr.push({ id: `fire-${i++}`, color: '#ff8c42', fire: true, pts: ring.map((c: number[]) => [c[1], c[0], 0.008]), stroke: 1.4, dash: 1, gap: 0, anim: 0 })
+      }
+      if ((resultGeo.fidelity === 'low' || polys.length === 0) && resultGeo.bbox?.length === 4) {
+        const [s, w, n, e] = resultGeo.bbox
+        arr.push({ id: 'fire-bbox', color: '#fbbf24', fire: true, pts: [[s, w, 0.008], [s, e, 0.008], [n, e, 0.008], [n, w, 0.008], [s, w, 0.008]], stroke: 1.2, dash: 0.08, gap: 0.04, anim: 3000 })
+      }
     }
     return arr
-  }, [nodes, nodeMeta])
+  }, [nodes, nodeMeta, resultGeo])
+
+  const resultPoints = useMemo(() => {
+    if (!resultGeo) return []
+    return resultGeo.features.filter((f) => f?.geometry?.type === 'Point').slice(0, 400).map((f, i) => ({ id: `fp${i}`, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], frp: Number(f.properties?.frp ?? f.properties?.score ?? 1) }))
+  }, [resultGeo])
 
   // Link arcs for every window: dim future, bright open, red killed, faded closed.
   const legWindows = useMemo(() => {
@@ -179,13 +208,25 @@ export default function Globe() {
       arr.push({ lat: p.lat, lng: p.lon, alt: dispAlt(p.alt_km) + 0.012, text: id + extra, color: nodeMeta[id]?.color ?? '#9ad', size: activeNodes.has(id) ? 1.25 : 0.95 })
     }
     for (const g of Object.values(gsMap)) arr.push({ lat: g.lat, lng: g.lon, alt: 0.012, text: g.name.split(' (')[0].toUpperCase(), color: 'rgba(200,220,245,0.85)', size: 0.75 })
+    arr.push({ lat: BUYER_POS.lat, lng: BUYER_POS.lon, alt: 0.012, text: 'EMERGENCY OPS · BUYER', color: GOLD, size: 0.8 })
+    const now = fxNow()
+    for (const b of Object.values(bursts)) {
+      const p = pos[b.node_id]
+      if (p && now - b.at < 4500) arr.push({ lat: p.lat + 4.5, lng: p.lon, alt: dispAlt(p.alt_km) + 0.05, text: b.label, color: '#ffffff', size: 1.05 })
+    }
+    if (resultGeo && resultGeo.fidelity === 'low' && resultGeo.bbox?.length === 4 && now - resultGeo.at < 12000) {
+      const [s, w, n, e] = resultGeo.bbox
+      arr.push({ lat: (s + n) / 2, lng: (w + e) / 2, alt: 0.03, text: 'LOW-FIDELITY CROP · extent only', color: '#fbbf24', size: 1.0 })
+    }
     return arr
-  }, [nodes, pos, gsMap, nodeMeta, transfers, activeNodes])
+  }, [nodes, pos, gsMap, nodeMeta, transfers, activeNodes, bursts, resultGeo, simT])
 
   const rings = useMemo(() => {
     const active = new Set<string>()
     for (const w of Object.values(windows)) if (w.status === 'open' && gsMap[w.to]) active.add(w.to)
-    return Object.values(gsMap).map((g) => ({ lat: g.lat, lng: g.lon, active: active.has(g.gs_id) }))
+    const out: any[] = Object.values(gsMap).map((g) => ({ lat: g.lat, lng: g.lon, active: active.has(g.gs_id), buyer: false }))
+    out.push({ lat: BUYER_POS.lat, lng: BUYER_POS.lon, active: false, buyer: true })
+    return out
   }, [gsMap, windows])
 
   const hex = useMemo(() => hotspots.map((h) => ({ lat: h.lat, lng: h.lon, w: Math.max(1, h.frp) })), [hotspots])
@@ -213,20 +254,43 @@ export default function Globe() {
     }
   }, [status])
 
-  useEffect(() => {
+  const userBusy = () => Date.now() - lastUserDrag.current < 8000
+  const frameNodes = (ids: string[], ms = 1500) => {
     const g = ref.current
-    if (!g || !focusLink) return
-    const key = focusLink.join('|') + ':' + currentLeg
-    if (lastFocus.current === key) return
-    lastFocus.current = key
-    const a = pos[focusLink[0]], b = pos[focusLink[1]]
-    if (!a) return
+    const a = pos[ids[0]], b = ids[1] ? pos[ids[1]] : undefined
+    if (!g || !a) return
     const mid = b ? lerpPos(a, b, 0.5) : a
     const span = b ? Math.hypot(a.lat - b.lat, Math.min(Math.abs(a.lon - b.lon), 360 - Math.abs(a.lon - b.lon))) : 20
     const geo = (a.alt_km > 20000 || (b && b.alt_km > 20000))
     const altitude = geo ? 2.6 : Math.min(2.4, Math.max(1.25, span / 40))
-    g.pointOfView({ lat: mid.lat, lng: mid.lon, altitude }, 1600)
+    g.pointOfView({ lat: mid.lat, lng: mid.lon, altitude }, ms)
+  }
+  useEffect(() => {
+    const g = ref.current
+    if (!g || !focusLink || userBusy()) return
+    const key = focusLink.join('|') + ':' + currentLeg
+    if (lastFocus.current === key) return
+    lastFocus.current = key
+    frameNodes(focusLink, 1600)
   }, [focusLink, currentLeg, pos])
+
+  // Camera choreography per protocol beat (never fights the user: skipped for 8 s after a drag)
+  const lastCue = useRef(0)
+  useEffect(() => {
+    const g = ref.current
+    if (!g || !ready || !cue || cue.at === lastCue.current || !scenario) return
+    lastCue.current = cue.at
+    if (userBusy()) return
+    const b = scenario.mission.scene.bbox
+    const papua = { lat: (b[0] + b[2]) / 2, lng: (b[1] + b[3]) / 2 }
+    const ctl = g.controls() as any
+    if (cue.kind === 'papua') { ctl.autoRotate = false; g.pointOfView({ ...papua, altitude: 1.55 }, 1500) }
+    else if (cue.kind === 'result') { ctl.autoRotate = false; g.pointOfView({ ...papua, altitude: 1.25 }, 1800) }
+    else if (cue.kind === 'link' && cue.nodes) frameNodes(cue.nodes, 1500)
+    else if (cue.kind === 'node' && cue.nodes) { const p = pos[cue.nodes[0]]; if (p) g.pointOfView({ lat: p.lat, lng: p.lon, altitude: 1.9 }, 1500) }
+    else if (cue.kind === 'pullout') { const cur = g.pointOfView(); g.pointOfView({ lat: cur.lat, lng: cur.lng, altitude: Math.min(3.2, (cur.altitude ?? 2) + 0.7) }, 1500) }
+    else if (cue.kind === 'idle') { ctl.autoRotate = true }
+  }, [cue, scenario, ready])
 
   // Initial POV over the scene
   useEffect(() => {
@@ -273,12 +337,20 @@ export default function Globe() {
         pathPointLat={(p: any) => p[0]}
         pathPointLng={(p: any) => p[1]}
         pathPointAlt={(p: any) => p[2]}
-        pathColor={(d: any) => [d.color + '00', d.color + (d.online ? 'cc' : '44'), d.color + '00']}
-        pathStroke={0.5}
-        pathDashLength={0.02}
-        pathDashGap={0.01}
-        pathDashAnimateTime={12000}
+        pathColor={(d: any) => (d.fire ? [d.color, '#ffffff', d.color] : [d.color + '00', d.color + (d.online ? 'cc' : '44'), d.color + '00'])}
+        pathStroke={(d: any) => d.stroke ?? 0.5}
+        pathDashLength={(d: any) => d.dash ?? 0.02}
+        pathDashGap={(d: any) => d.gap ?? 0.01}
+        pathDashAnimateTime={(d: any) => d.anim ?? 12000}
         pathTransitionDuration={0}
+        pointsData={resultPoints}
+        pointLat="lat"
+        pointLng="lng"
+        pointAltitude={0.012}
+        pointRadius={(d: any) => 0.08 + Math.min(0.14, Math.log10(1 + d.frp) * 0.08)}
+        pointColor={() => '#ffb347'}
+        pointsMerge
+        pointsTransitionDuration={0}
         arcsData={arcs}
         arcStartLat="startLat"
         arcStartLng="startLng"
@@ -309,10 +381,10 @@ export default function Globe() {
         ringLat="lat"
         ringLng="lng"
         ringAltitude={0.004}
-        ringColor={(d: any) => (t: number) => (d.active ? `rgba(79,209,255,${1 - t})` : `rgba(180,200,230,${0.55 * (1 - t)})`)}
-        ringMaxRadius={(d: any) => (d.active ? 5 : 2.6)}
-        ringPropagationSpeed={(d: any) => (d.active ? 2.2 : 0.8)}
-        ringRepeatPeriod={(d: any) => (d.active ? 700 : 1800)}
+        ringColor={(d: any) => (t: number) => (d.buyer ? `rgba(255,209,102,${0.7 * (1 - t)})` : d.active ? `rgba(79,209,255,${1 - t})` : `rgba(180,200,230,${0.55 * (1 - t)})`)}
+        ringMaxRadius={(d: any) => (d.buyer ? 3.2 : d.active ? 5 : 2.6)}
+        ringPropagationSpeed={(d: any) => (d.buyer ? 1 : d.active ? 2.2 : 0.8)}
+        ringRepeatPeriod={(d: any) => (d.buyer ? 2200 : d.active ? 700 : 1800)}
         hexBinPointsData={hex}
         hexBinPointLat="lat"
         hexBinPointLng="lng"
@@ -334,17 +406,11 @@ export default function Globe() {
           ctl.maxDistance = 800
           const scene = g.scene()
           scene.add(new THREE.AmbientLight(0x6a7a99, 0.5))
+          ctl.addEventListener('start', () => { lastUserDrag.current = Date.now() })
+          startFxLayer(g, posRef, (id) => nodeMetaRef.current[id]?.color ?? '#9ad')
+          setReady(true)
         }}
       />
-      <div className="absolute left-1/2 -translate-x-1/2 bottom-3 panel px-3 py-2 text-[10px] font-mono text-dim leading-4 pointer-events-none whitespace-nowrap">
-        <div><span className="text-ink">LEGEND</span> · real SGP4 orbits · GEO altitude display-compressed · VIIRS hotspots (24 h)</div>
-        <div className="flex gap-3 mt-1">
-          <span><i className="inline-block w-5 border-t-2 border-dashed border-[#8caad2]/40 align-middle mr-1" />future window</span>
-          <span><i className="inline-block w-5 border-t-2 border-[#4fd1ff] align-middle mr-1" />open link</span>
-          <span><i className="inline-block w-5 border-t-2 border-dotted border-[#f87171] align-middle mr-1" />killed</span>
-          <span><i className="inline-block w-2 h-2 rounded-full bg-[#ff8c42] align-middle mr-1" />fire</span>
-        </div>
-      </div>
     </div>
   )
 }

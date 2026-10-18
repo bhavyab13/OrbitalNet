@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Broker } from "./mcp.js";
 import { runAuto } from "./auto.js";
 import { runLLM } from "./llm.js";
+import { runOpenAI } from "./llm-openai.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(here, "../../../.env") });
@@ -24,12 +25,15 @@ if (args.includes("--budget")) mission.budget_usd = Number(opt("--budget", Strin
 if (args.includes("--fidelity")) mission.required_fidelity = opt("--fidelity", "any");
 if (args.includes("--id")) mission.mission_id = opt("--id", mission.mission_id);
 const brokerUrl = opt("--broker", (process.env.BROKER_URL ?? "http://localhost:3000") + "/mcp");
-const useLLM = flag("--llm") || (!flag("--auto") && !!process.env.ANTHROPIC_API_KEY);
+const provider = flag("--auto") ? "auto" : (opt("--provider", process.env.BUYER_PROVIDER ?? (process.env.ANTHROPIC_API_KEY ? "anthropic" : process.env.OPENAI_API_KEY ? "openai" : "auto")));
+const useLLM = provider !== "auto";
 
 const broker = new Broker(brokerUrl);
 const tools = await broker.connect();
 console.log(`connected to ${brokerUrl}; tools: ${tools.map((t) => t.name).join(", ")}`);
-console.log(`mode: ${useLLM ? "LLM (" + (process.env.BUYER_MODEL ?? "claude-opus-5-5") + ")" : "deterministic"}`);
+console.log(`mode: ${useLLM ? `LLM via ${provider} (${process.env.BUYER_MODEL ?? (provider === "openai" ? "gpt-4.1-mini" : "claude-opus-5-5")})` : "deterministic"}`);
 try {
-  if (useLLM) await runLLM(broker, mission); else await runAuto(broker, mission);
+  if (!useLLM) await runAuto(broker, mission);
+  else if (provider === "openai") await runOpenAI(broker, mission);
+  else await runLLM(broker, mission);
 } finally { await broker.close(); }

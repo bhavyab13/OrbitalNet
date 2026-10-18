@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { fxOnEvent, useFx } from './fx'
 import type {
   AuditItem, ContactWindow, Hotspot, MissionResult, MissionStatus, NarrationItem, NodeLive,
   Payment, Plan, Scenario, SimEvent, Transfer, WindowStatus,
@@ -111,6 +112,7 @@ export const useStore = create<State>((set, get) => ({
   reset: () => {
     const s = get().scenario
     if (!s) return
+    useFx.getState().clear()
     get().setScenario(s)
     set({ simT: 0, status: 'IDLE', spentUsd: 0, refundedUsd: 0, plans: [], chosenPlanId: undefined, currentLegIndex: undefined, transfers: {}, payments: [], audit: [], narration: [], currentAct: undefined, result: undefined, resultOpen: false, committedNode: undefined, focusLink: undefined })
   },
@@ -152,6 +154,7 @@ export const useStore = create<State>((set, get) => ({
 
   applyEvent: (e) => {
     const s = get()
+    try { fxOnEvent(e, s) } catch { /* effects never break the reducer */ }
     const simT = typeof e.sim_t === 'number' ? e.sim_t : s.simT
     const patch: Partial<State> = { simT, lastEventAt: Date.now() }
     const push = <T,>(arr: T[], item: T, max = 200) => [item, ...arr].slice(0, max)
@@ -267,9 +270,39 @@ export const useStore = create<State>((set, get) => ({
         break
       }
       case 'payment': {
+        if (e.method === 'mpp-session') {
+          // Final settlement of a metered row (if we saw its usage events) — replace it instead of adding a second line.
+          const mid = `metered:${e.mission_id ?? ''}:${e.node_id ?? e.operator_id}:${e.grant_id ?? ''}`
+          const existing = s.payments.find((p) => p.id === mid)
+          const p: Payment = { id: existing ? mid : uid(), sim_t: existing?.sim_t ?? simT, operator_id: e.operator_id, node_id: e.node_id, amount_usd: Number(e.amount_usd ?? 0), method: 'mpp-session', receipt_ref: e.receipt_ref ?? '', description: e.description, metered: true, settled: true, settlement_refs: e.settlement_refs, units: existing?.units_total ?? existing?.units, units_total: existing?.units_total }
+          patch.payments = existing ? s.payments.map((x) => (x.id === mid ? p : x)) : push(s.payments, p)
+          patch.spentUsd = s.spentUsd - (existing?.amount_usd ?? 0) + p.amount_usd
+          audit('attestation', `Metered session settled · ${e.node_id ?? e.operator_id} · $${p.amount_usd.toFixed(4)}`, 'ok', e.settlement_refs?.length ? `on-chain ${e.settlement_refs.length} settlement tx` : undefined)
+          break
+        }
         const p: Payment = { id: uid(), sim_t: simT, operator_id: e.operator_id, node_id: e.node_id, amount_usd: Number(e.amount_usd ?? 0), method: e.method ?? 'mpp', receipt_ref: e.receipt_ref ?? '', description: e.description }
         patch.payments = push(s.payments, p)
         patch.spentUsd = s.spentUsd + p.amount_usd
+        break
+      }
+      case 'metered_start':
+      case 'metered_usage': {
+        const mid = `metered:${e.mission_id ?? ''}:${e.node_id}:${e.grant_id ?? ''}`
+        const existing = s.payments.find((p) => p.id === mid)
+        const amt = Number(e.usd_accrued ?? 0)
+        const p: Payment = { id: mid, sim_t: existing?.sim_t ?? simT, operator_id: e.operator_id, node_id: e.node_id, amount_usd: amt, method: 'mpp-session', receipt_ref: existing?.receipt_ref ?? '', metered: true, settled: false, units: e.units ?? 0, units_total: e.units_total ?? e.units, description: `metering ${e.rail ?? ''} session` }
+        patch.payments = existing ? s.payments.map((x) => (x.id === mid ? p : x)) : push(s.payments, p)
+        patch.spentUsd = s.spentUsd - (existing?.amount_usd ?? 0) + amt
+        break
+      }
+      case 'metered_settled': {
+        const mid = `metered:${e.mission_id ?? ''}:${e.node_id}:${e.grant_id ?? ''}`
+        const existing = s.payments.find((p) => p.id === mid)
+        if (existing) {
+          const p: Payment = { ...existing, amount_usd: Number(e.total_usd ?? existing.amount_usd), settled: true, units: e.units ?? existing.units_total, units_total: e.units ?? existing.units_total, settlement_refs: e.settlement_refs, receipt_ref: existing.receipt_ref || (e.settlement_refs?.[0] ?? '') }
+          patch.payments = s.payments.map((x) => (x.id === mid ? p : x))
+          patch.spentUsd = s.spentUsd - existing.amount_usd + p.amount_usd
+        }
         break
       }
       case 'refund': {
@@ -340,7 +373,8 @@ export const useStore = create<State>((set, get) => ({
       case 'delivered': {
         patch.status = 'DELIVERED'
         patch.result = { ...(s.result ?? {}), ...(e.result ?? {}), delivered_sim_t: simT, delivered_to: e.to ?? e.ground_station }
-        patch.resultOpen = true
+        // let the fire perimeters land on the planet first, then open the result panel
+        setTimeout(() => { if (get().status === 'DELIVERED') set({ resultOpen: true }) }, Number((window as any).__resultDelayMs ?? 2600))
         audit('info', `Delivered to ${e.to ?? e.ground_station ?? 'ground'} at T+${simT}s`, 'ok')
         break
       }

@@ -16,6 +16,9 @@ if not SCENARIO_PATH.is_absolute():
 TLE_PATH = ROOT / "data" / "active.tle"
 KEYS_DIR = ROOT / "keys"
 SIM_PUBLIC_URL = env("SIM_PUBLIC_URL", "http://localhost:8000").rstrip("/")
+BROKER_URL = env("BROKER_URL", "http://localhost:3000").rstrip("/")
+# OCGP §2.10: relay downlinks are carried as metered MPP sessions through the broker (pay per 100 KB as bytes flow)
+METERED_RELAY = env("METERED_RELAY", "1") == "1"
 ADMIN_TOKEN = env("ADMIN_TOKEN", "judge-556677")
 
 

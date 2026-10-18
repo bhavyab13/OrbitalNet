@@ -1,6 +1,8 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { config as dotenv } from "dotenv";
+import { PROTOCOL_TEXT, SCENARIO } from "./assets.gen.js";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 export const PKG_ROOT = path.resolve(here, "..");
@@ -25,8 +27,17 @@ export const env = {
 export function findFile(...candidates: string[]): string | undefined {
   return candidates.find((p) => fs.existsSync(p));
 }
+/** Inlined copies (src/assets.gen.ts) are the fallback: the deployed bundle on Manufact Cloud has no
+ *  monorepo on disk, so a path-based lookup finds nothing there. */
+function inlined(name: string, text: string): string {
+  const p = path.join(os.tmpdir(), `orbitalnet-${name}`);
+  try { fs.writeFileSync(p, text); } catch { /* read-only fs: callers fall back to the inlined text */ }
+  return p;
+}
 export const PROTOCOL_MD =
-  findFile(path.join(REPO_ROOT, "docs/PROTOCOL.md"), path.join(PKG_ROOT, "PROTOCOL.md"));
+  findFile(path.join(REPO_ROOT, "docs/PROTOCOL.md"), path.join(PKG_ROOT, "PROTOCOL.md")) ?? inlined("PROTOCOL.md", PROTOCOL_TEXT);
 export const SCENARIO_JSON =
-  findFile(path.join(REPO_ROOT, "data/scenario.json"), path.join(PKG_ROOT, "scenario.json"));
-export const scenario: any = SCENARIO_JSON ? JSON.parse(fs.readFileSync(SCENARIO_JSON, "utf8")) : {};
+  findFile(path.join(REPO_ROOT, "data/scenario.json"), path.join(PKG_ROOT, "scenario.json")) ?? inlined("scenario.json", JSON.stringify(SCENARIO));
+let loaded: any = SCENARIO;
+try { loaded = JSON.parse(fs.readFileSync(SCENARIO_JSON, "utf8")); } catch { /* keep inlined */ }
+export const scenario: any = loaded;

@@ -24,7 +24,7 @@
     "start": "mcp-use start",
     "deploy": "mcp-use deploy",
     "typecheck": "mcp-use typecheck",
-    "prepare-assets": "cp ../../docs/PROTOCOL.md ./PROTOCOL.md && cp ../../data/scenario.json ./scenario.json",
+    "prepare-assets": "node scripts/gen-assets.mjs",
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {

@@ -137,6 +137,12 @@ export interface Payment {
   method: string
   receipt_ref: string
   description?: string
+  /** OCGP §2.10 metered MPP session: amount counts up while bytes flow, then settles. */
+  metered?: boolean
+  settled?: boolean
+  units?: number
+  units_total?: number
+  settlement_refs?: string[]
 }
 
 export interface AuditItem {

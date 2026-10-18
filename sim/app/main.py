@@ -168,7 +168,10 @@ async def resume_mission(mid: str, body: dict[str, Any]):
     ms["plan"] = plan_
     ms["grants"] = grants
     ms["replans"] = ms.get("replans", 0) + 1
-    ms["total_paid_usd"] = round(ms.get("total_paid_usd", 0) + _total_paid(grants) - float(body.get("refunded_usd", 0)), 4)
+    # Only grants not seen before count as new spend (the broker re-sends every grant on resume).
+    known_ids = {g.get("grant_id") for g in list(ms.get("previous_grants", {}).values()) if isinstance(g, dict)}
+    new_grants = {k: g for k, g in grants.items() if isinstance(g, dict) and g.get("grant_id") not in known_ids}
+    ms["total_paid_usd"] = round(ms.get("total_paid_usd", 0) + _total_paid(new_grants) - float(body.get("refunded_usd", 0)), 4)
     ms["budget_remaining_usd"] = round(float(ms["mission"]["budget_usd"]) - ms["total_paid_usd"], 4)
     for leg in plan_["legs"]:
         leg.setdefault("status", "PENDING")

@@ -11,6 +11,7 @@ import { env, PROTOCOL_MD, SCENARIO_JSON, scenario } from "./src/config.js";
 import * as registry from "./src/registry.js";
 import { simFetch, emit } from "./src/sim.js";
 import * as broker from "./src/broker.js";
+import { streamTransfer } from "./src/stream.js";
 import { brokerWallet, getPayFetch } from "./src/pay.js";
 
 const server = new MCPServer({
@@ -32,6 +33,13 @@ const server = new MCPServer({
 server.get("/health", (c) => c.json({ ok: true, sim: env.SIM_URL, mock_sim: env.MOCK_SIM, providers: registry.list().length, wallet: brokerWallet() ?? null }));
 server.get("/registry", (c) => c.json({ providers: registry.list().map(({ manifest, ...e }) => ({ ...e, manifest })) }));
 server.post("/reset", async (c) => { const r = await simFetch("/reset", { method: "POST", json: {} }).catch(() => ({ ok: false })); broker.missions.clear(); return c.json({ ok: true, world: Boolean(r?.ok ?? true) }); });
+// OCGP §2.10: the world runner asks the broker to carry a relay downlink as a metered MPP session (pay per 100 KB as bytes flow).
+server.post("/transfer/stream", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  for (const k of ["mission_id", "operator_id", "grant", "world_assertion", "payload_b64", "bytes_mb"]) if (body[k] === undefined) return c.json({ ok: false, reason: `${k} required` }, 400);
+  const r = await streamTransfer(body);
+  return c.json(r, r.ok ? 200 : 409);
+});
 server.post("/registry", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const url = body.manifest_url ?? body.base_url;
@@ -63,6 +71,17 @@ const ro = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
 const rw = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 
 // ---------- tools ----------
+// Every tool call is announced to the world (dashboard "Manufact MCP · call from <client>" stamp + analytics narrative).
+{
+  const _tool = (server as any).tool.bind(server);
+  (server as any).tool = (def: any, handler: any) => _tool(def, async (input: any, ctx: any) => {
+    let client = "unknown";
+    try { const info = ctx?.client?.info?.(); client = info?.name ? `${info.name}${info.version ? "/" + info.version : ""}` : client; } catch { /* unverified client metadata */ }
+    try { emit({ type: "mcp_client_call", tool: def.name, client, mission_id: input?.mission_id }); } catch { /* sim offline */ }
+    return handler(input, ctx);
+  });
+}
+
 export const discoverProviders = server.tool({
   name: "discover_providers", title: "Discover providers",
   description: "List independently operated satellite providers currently registered with the marketplace, with their signed self-describing manifests (capabilities, limits, prices, policy, payment methods) and live capacity. Use this first. A provider that boots later shows up automatically.",

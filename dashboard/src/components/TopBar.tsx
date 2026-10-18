@@ -1,6 +1,7 @@
 import { useStore } from '../store'
 import { clock } from '../lib/controls'
 import { Link, useLocation } from 'react-router-dom'
+import { useFx } from '../fx'
 
 const statusColor: Record<string, string> = {
   IDLE: 'text-dim border-line', PLANNED: 'text-accent border-accent/50', RUNNING: 'text-ok border-ok/50',
@@ -10,6 +11,8 @@ const statusColor: Record<string, string> = {
 export default function TopBar() {
   const { scenario, mode, connected, status, paused, accel, storyMode, setStoryMode } = useStore()
   const loc = useLocation()
+  const soundOn = useFx((s) => s.soundOn)
+  const setSoundOn = useFx((s) => s.setSoundOn)
   return (
     <div className="h-12 flex items-center gap-3 px-3 sm:px-4 border-b border-line bg-[rgba(5,8,15,0.8)] backdrop-blur-md relative z-20 overflow-hidden">
       <div className="flex items-center gap-2">
@@ -39,6 +42,7 @@ export default function TopBar() {
       </div>
       <div className="h-5 w-px bg-line hidden md:block" />
       <button className={`btn hidden md:inline-block ${storyMode ? 'active' : ''}`} onClick={() => setStoryMode(!storyMode)}>Story mode</button>
+      <button className={`btn hidden md:inline-block ${soundOn ? 'active' : ''}`} title="sound cues: grant, payment, refund" onClick={() => setSoundOn(!soundOn)}>{soundOn ? '🔊' : '🔇'}</button>
       <Link to={loc.pathname === '/judge' ? '/' : '/judge'} className="btn">{loc.pathname === '/judge' ? 'Control room' : 'Judge panel'}</Link>
     </div>
   )

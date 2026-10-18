@@ -14,6 +14,8 @@ import { verifyFulfilment } from "./verify.ts";
 import { makePayments, type Payments } from "./pay.ts";
 import { makeEmitter } from "./events.ts";
 import { makeWorld } from "./world.ts";
+import { makeSessionGate, type SessionGate } from "./session.ts";
+import { streamSSE } from "hono/streaming";
 import { runFireDetector } from "./inference.ts";
 
 export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) {
@@ -21,6 +23,9 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
   const emit = makeEmitter(cfg);
   const world = makeWorld(cfg);
   const pay = payments ?? (await makePayments(cfg));
+  let gate: SessionGate | null = null;
+  try { gate = await makeSessionGate(cfg); } catch (e: any) { console.warn(`[${cfg.NODE_ID}] metered sessions unavailable: ${e?.message ?? e}`); }
+  if (gate) console.log(`[${cfg.NODE_ID}] metered relay: ${gate.rail} rail, $${gate.unitUsd} per ${gate.unitType}${gate.operatorAddress ? ` (settler ${gate.operatorAddress})` : ""}`);
   const app = new Hono();
   app.use("*", cors());
 
@@ -235,6 +240,65 @@ export async function buildApp(cfg: Config = loadConfig(), payments?: Payments) 
     await emit("grant_fulfilled", { mission_id: grant.mission_id, grant_id: grant.grant_id, attestation_id: att.attestation_id, bytes: Math.max(bytes, declaredBytes), sim_t: wa.sim_t });
     return c.json({ attestation: att, delivered_bytes: Math.max(bytes, declaredBytes) });
   });
+
+  // ---- OCGP §2.10 metered usage: pay-as-bytes-flow over an MPP session (Stripe: settles to the Stripe balance).
+  app.get("/metered", (c) => c.json(gate ? { enabled: true, rail: gate.rail, unit_usd: gate.unitUsd, unit_type: gate.unitType, endpoint: "/transmit/stream", settler: gate.operatorAddress ?? null, settlements: gate.settlements } : { enabled: false }));
+  const streamHandler = async (c: any) => {
+    if (st.role !== "relay" || !gate) return c.json({ error: "ocgp/not-a-relay-node" }, 404);
+    const body = await c.req.json();
+    const worldPub = await world.fetchWorldPub();
+    const payload = String(body.payload_b64 ?? "");
+    const realBytes = Buffer.from(payload, "base64").byteLength;
+    const declaredBytes = Number(body.bytes_mb ?? body.params?.payload_mb ?? 0) * 1e6;
+    const totalBytes = Math.max(realBytes, declaredBytes);
+    // Verified BEFORE any SSE frame is written: a JSON 403 is not an event stream, so nothing is metered.
+    const v = verifyFulfilment(st, worldPub, { grant: body.grant, world_assertion: body.world_assertion, payload_bytes: totalBytes, op: "relay" });
+    if (!v.ok) return reject(c, v.rej.reason, v.rej.detail);
+    const { grant, wa } = v;
+    const rec = st.grants.get(grant.grant_id)!;
+    const unitBytes = 100_000;
+    // Minimum billable transfer is 5 units (0.5 MB): tiny payloads still settle at least one cent (Stripe's settlement floor).
+    const MIN_BILLABLE_UNITS = Number(process.env.MIN_BILLABLE_UNITS ?? 5);
+    const units = Math.max(MIN_BILLABLE_UNITS, Math.ceil(totalBytes / unitBytes));
+    const mb = totalBytes / 1e6;
+    const modeledS = wa.bandwidth_mbps ? (mb * 8) / wa.bandwidth_mbps : 0;
+    let accel = Number(cfg.scenario.sim?.accel ?? 4);
+    try { const r = await fetch(`${cfg.SIM_URL}/state`, { signal: AbortSignal.timeout(800) }); const j: any = await r.json(); accel = Number(j.real_accel ?? j.accel ?? accel) || accel; } catch {}
+    const realS = Math.min(Math.max(modeledS / accel, Math.min(units * 0.03, 12)), 12);
+    const paceMs = units > 1 ? (realS * 1000) / units : 0;
+    const unitUsd = gate.unitUsd;
+    const settledBefore = gate.settlements.length;
+    await emit("metered_start", { mission_id: grant.mission_id, grant_id: grant.grant_id, window_id: grant.window_id, units, unit_usd: unitUsd, bytes: totalBytes, rail: gate.rail, sim_t: wa.sim_t });
+    return streamSSE(c, async (stream: any) => {
+      let moved = 0; let usd = 0;
+      for (let i = 1; i < units; i++) {
+        moved = Math.min(totalBytes, i * unitBytes); usd = i * unitUsd;
+        await stream.writeSSE({ data: JSON.stringify({ unit: i, units_total: units, mb_moved: moved / 1e6, mb_total: mb, usd_accrued: Number(usd.toFixed(6)) }) });
+        if (i % 5 === 0) await emit("metered_usage", { mission_id: grant.mission_id, grant_id: grant.grant_id, window_id: grant.window_id, mb_moved: moved / 1e6, mb_total: mb, usd_accrued: Number(usd.toFixed(6)), units: i, units_total: units });
+        if (paceMs > 0) await new Promise((r) => setTimeout(r, paceMs));
+      }
+      // Final frame (the last metered unit): the signed attestation.
+      usd = units * unitUsd;
+      let attBytes = totalBytes;
+      if (st.misbehave === "over_attest") { st.misbehave = "none"; attBytes = 2 * Number(grant.limits?.max_payload_mb ?? 1) * 1e6; await emit("attestation_overreported", { mission_id: grant.mission_id, grant_id: grant.grant_id, input_bytes: attBytes }); }
+      const att = sign({
+        attestation_id: newId("a"), grant_id: grant.grant_id, mission_id: grant.mission_id, node_id: cfg.NODE_ID, operator_id: cfg.OPERATOR_ID,
+        op: "relay", input_bytes: attBytes, output_bytes: attBytes, compute_s: 0, power_wh: 0, result_sha256: sha256Hex(payload),
+        sim_t_start: wa.sim_t, sim_t_end: wa.sim_t + Math.ceil(modeledS), receipt_ref: grant.payment.receipt_ref,
+        metered: { units, unit_type: gate!.unitType, unit_usd: unitUsd, metered_usd: Number(usd.toFixed(6)), rail: gate!.rail },
+      }, cfg.key.private_key!, cfg.KID);
+      rec.status = "fulfilled"; rec.attestation_id = att.attestation_id;
+      st.ledger.push({ ts: new Date().toISOString(), sim_t: wa.sim_t, kind: "fulfilled", ref: grant.grant_id, note: `metered relay ${mb.toFixed(3)} MB, ${units} units, $${usd.toFixed(4)}` });
+      await stream.writeSSE({ data: JSON.stringify({ done: true, unit: units, units_total: units, mb_moved: mb, mb_total: mb, usd_accrued: Number(usd.toFixed(6)), attestation: att, metered_usd: Number(usd.toFixed(6)) }) });
+      // Scheduled settlements are on-chain transactions; give the last one a moment to confirm so the settled event carries every tx.
+      const expected = Math.floor(usd / 0.01 + 1e-9);
+      for (let i = 0; i < 40 && gate!.settlements.length - settledBefore < expected; i++) await new Promise((r) => setTimeout(r, 250));
+      const refs = gate!.settlements.slice(settledBefore);
+      await emit("grant_fulfilled", { mission_id: grant.mission_id, grant_id: grant.grant_id, attestation_id: att.attestation_id, bytes: totalBytes, sim_t: wa.sim_t, metered_usd: Number(usd.toFixed(6)) });
+      await emit("metered_settled", { mission_id: grant.mission_id, grant_id: grant.grant_id, window_id: grant.window_id, total_usd: Number(usd.toFixed(6)), units, rail: gate!.rail, settlement_refs: refs.map((r) => r.txHash), settlements: refs });
+    });
+  };
+  if (gate?.middleware) app.post("/transmit/stream", gate.middleware, streamHandler); else app.post("/transmit/stream", streamHandler);
 
   app.post("/refund", async (c) => {
     const body = await c.req.json();
