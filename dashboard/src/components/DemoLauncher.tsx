@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { demos, FALLBACK_DEMOS } from '../lib/demos'
 
-/** Three scripted demos: each runs the whole protocol flow with judge cues fired at fixed sim times. */
+/** Three demos: each runs the whole protocol flow with judge cues fired at fixed sim times. */
 export default function DemoLauncher({ big = false }: { big?: boolean }) {
   const list = useStore((s) => s.demos)
   const demo = useStore((s) => s.demo)

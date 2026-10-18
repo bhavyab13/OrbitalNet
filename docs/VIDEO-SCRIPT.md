@@ -13,7 +13,7 @@ Open **http://localhost:5173** full screen. Press **1**, **2** or **3** (or the 
 | ③ E1 withdraw | "First failure, on purpose: the relay pulls out between quote and commit. Zero dollars moved. The compute hold is released. Commitment is conditional across owners, or an agent can't be trusted with a wallet." |
 | ④ Pay + grants | "**Stripe.** Each reservation is a Machine Payments Protocol 402. The agent pays, Stripe records the PaymentIntent you see landing on the right, and the provider signs a grant bound to that receipt." |
 | ⑤ Crosslink + inference | "**InstaBox.** That compute satellite is a real machine we don't control. It verifies the grant with its own key and the world's signed clock, offline, then runs real fire detection on the real scene." |
-| ⑥ Metered downlink | "**Stripe sessions.** The relay bytes are metered: a fifth of a cent per hundred kilobytes, settled to Stripe a cent at a time. Pay for exactly what moved." |
+| ⑥ Metered downlink | "**Stripe sessions.** The relay bytes are metered: a fifth of a cent per hundred kilobytes, settled to Stripe as the bytes move. Pay for exactly what moved." |
 | ⑦ Delivered + reconcile | "Delivered under the deadline. And the books balance: every receipt matches a grant, every grant matches a signed attestation of the work. That triple is the protocol." |
 
 ## Demo 2 — Outage, refund, and a stranger (press 2, ~90 s)
@@ -32,7 +32,7 @@ Open **http://localhost:5173** full screen. Press **1**, **2** or **3** (or the 
 | ① Mission arrives, budget $1.50 | "Different ask: rough extent is fine, keep it under a dollar fifty. Now the full-fidelity plan is over budget and the market offers something else." |
 | ② Low-fidelity crop chosen | "The agent buys a forty-megabyte downsampled crop instead of on-orbit analysis. Cheaper, same deadline, lower fidelity, and it says so." |
 | ③ Pay | "**Stripe** reservation, as before." |
-| ④ 40 MB metered | "Here's the micropayment architecture at full tilt: forty megabytes through the relay, four hundred units, settled to Stripe one cent at a time. Count them on the right." |
+| ④ 40 MB metered | "Here's the micropayment architecture at full tilt: forty megabytes through the relay, four hundred metered units, settled to Stripe ten cents at a time as the bytes move. Count the settlements landing on the right." |
 | ⑤ Delivered, low fidelity | "Delivered: a real downsampled image, labelled low fidelity." |
 | ⑥ Reconcile catches a lie | "One more thing. That relay over-reported its usage. The attestation is validly signed, so only reconciliation catches it: receipt, grant and attestation disagree, and the provider is marked untrusted for the next mission. Trust is a protocol output, not an assumption." |
 

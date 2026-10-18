@@ -195,7 +195,7 @@ export function startMock() {
   const startAt = Number(new URLSearchParams(location.search).get('t') ?? 0)
   if (startAt > 0) { simT = startAt; applyUpTo(startAt); st.setPositions(allPositions(nodeIds, epoch, simT)) }
 
-  // ---- mock scripted demos (same timeline, narrated as numbered steps)
+  // ---- mock demos (same timeline, narrated as numbered steps)
   const DEMO_DEFS = [
     { id: 1, title: 'Impossible alone', subtitle: 'Two strangers, one deadline: conditional commitment, Stripe-paid grants, real inference on an InstaBox satellite', steps: [
       { t: 0, title: 'A mission arrives', detail: '3,812 real VIIRS fire detections over Papua; a perimeter is due in 12 minutes' },

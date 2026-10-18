@@ -192,7 +192,7 @@ export interface SimEvent {
   [k: string]: any
 }
 
-// ---- scripted demos + live proof panels
+// ---- demos + live proof panels
 export interface DemoStep { title: string; detail?: string }
 export interface DemoDef { id: number; title: string; subtitle?: string; steps: DemoStep[] }
 export interface DemoState {

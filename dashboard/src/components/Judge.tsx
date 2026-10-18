@@ -21,7 +21,7 @@ export default function Judge() {
   return (
     <div className="h-full scroll px-4 py-4 max-w-[560px] mx-auto flex flex-col gap-3">
       <div className="panel p-3 flex flex-col gap-2">
-        <div className="panel-title">Scripted demos</div>
+        <div className="panel-title">Demos</div>
         <DemoLauncher big />
       </div>
       <div className="panel p-3">

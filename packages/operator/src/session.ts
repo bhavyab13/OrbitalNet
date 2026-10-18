@@ -65,6 +65,6 @@ export async function makeSessionGate(cfg: Config): Promise<SessionGate | null> 
   const mppx: any = HonoMppx.create({ methods: [method], secretKey: cfg.MPP_SECRET_KEY } as any);
   const sessionFn = typeof mppx.session === "function" ? mppx.session : mppx.tempo?.session;
   if (typeof sessionFn !== "function") throw new Error("mppx hono wrapper exposes no session() handler");
-  const middleware: MiddlewareHandler = sessionFn({ amount: unitUsd.toFixed(6), unitType, suggestedDeposit: "0.10" });
+  const middleware: MiddlewareHandler = sessionFn({ amount: unitUsd.toFixed(6), unitType, suggestedDeposit: process.env.SESSION_DEPOSIT_USD ?? "1.00" });
   return { rail, unitUsd, unitType, middleware, settlements, operatorAddress: operator.address };
 }
