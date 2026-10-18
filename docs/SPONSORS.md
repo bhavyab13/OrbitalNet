@@ -2,7 +2,9 @@
 
 Everything runs locally today with **no accounts**: payments go over Tempo testnet through real MPP 402 challenges (already verified), the MCP broker runs locally, operators run as local processes. The steps below swap each piece onto the sponsor's real platform. Do them in this order; each is independent.
 
-## 1. Stripe (track: machine payments) — 5 min, optional but high-value
+## 1. Stripe (track: machine payments) — DONE 2026-10-18
+Sandbox acct `acct_1URuY0GhDL5moMEd`, profile `profile_test_61VbIg…`, Tempo deposit address created; `PAY_RAIL=stripe`. Each `/reserve` 402 offers `stripe` (SPT card) + `tempo` (via Stripe deposit address). PaymentIntents appear at https://dashboard.stripe.com/test/payments.
+
 What judges will see either way: real MPP `402 Payment Required` challenges, signed receipts, tx hashes. With Stripe keys they ALSO see PaymentIntents land in the Stripe Dashboard.
 1. Create a sandbox at https://dashboard.stripe.com → Developers → API keys → copy `sk_test_…`.
 2. Create a Business Profile: `curl https://api.stripe.com/v2/network/business_profiles/me -u sk_test_XXX: -H "Stripe-Version: 2026-07-29.preview"` → copy the `profile_test_…` id.
@@ -10,7 +12,10 @@ What judges will see either way: real MPP `402 Payment Required` challenges, sig
 4. In `.env`: `PAY_RAIL=stripe`, `STRIPE_SECRET_KEY=sk_test_…`, `STRIPE_PROFILE_ID=profile_test_…`, `TEMPO_DEPOSIT_ADDRESS=…`. Restart operators.
 5. Validate one operator: `npx mppx@latest validate http://localhost:7002` (expect all green). Also talk to Peter (Stripe YC lead) and show him the `/reserve` → grant flow; ask for their hackathon cheat-sheet link.
 
-## 2. Manufact (track: best MCP server / MCP App) — 5 min
+## 2. Manufact (track: best MCP server / MCP App) — DONE 2026-10-18
+Hosted: `https://calm-wave-z8g51.run.mcp-use.com/mcp` (server `orbitalnet-marketplace`, slug `calm-wave-z8g51`). Redeploy: `cd packages/marketplace && npm run prepare-assets && npx -y mcp-use@latest deploy --no-github -y`. Update env after new tunnels: `npx -y mcp-use@latest servers env set calm-wave-z8g51 SIM_URL=… ` and `REGISTRY_SEED=…`.
+Claude Code: `claude mcp add --transport http orbitalnet https://calm-wave-z8g51.run.mcp-use.com/mcp`. Claude Desktop: Settings → Connectors → Add custom connector → that URL.
+
 1. `export PATH=/opt/homebrew/opt/node@22/bin:$PATH`
 2. `cd packages/marketplace && npx -y mcp-use@latest login` (browser login).
 3. The broker must reach the sim and operators from the cloud. Either (a) run them on InstaBox (step 3) and put their public URLs in the deploy env, or (b) tunnel: `brew install cloudflared && cloudflared tunnel --url http://localhost:8000` (one per service) and paste the URLs.

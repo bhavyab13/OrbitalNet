@@ -84,6 +84,7 @@ export function loadConfig() {
     TEMPO_RECIPIENT,
     STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY ?? "",
     STRIPE_PROFILE_ID: process.env.STRIPE_PROFILE_ID ?? "",
+    TEMPO_DEPOSIT_ADDRESS: process.env.TEMPO_DEPOSIT_ADDRESS ?? "",
     MPP_SECRET_KEY: env("MPP_SECRET_KEY", "b3JiaXRhbG5ldC1kZXYtc2VjcmV0LWtleS0zMmJ5dGVzLW1pbmltdW0="),
     ADMIN_TOKEN: env("ADMIN_TOKEN", "judge-556677"),
     key,

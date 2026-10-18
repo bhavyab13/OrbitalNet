@@ -28,7 +28,9 @@ export async function makePayments(cfg: Config) {
     if (!cfg.STRIPE_SECRET_KEY || !cfg.STRIPE_PROFILE_ID) throw new Error("PAY_RAIL=stripe needs STRIPE_SECRET_KEY and STRIPE_PROFILE_ID");
     const Stripe = (await import("stripe")).default;
     const client = new Stripe(cfg.STRIPE_SECRET_KEY);
-    const mp = stripe.create({ client, networkId: cfg.STRIPE_PROFILE_ID, livemode: !cfg.STRIPE_SECRET_KEY.includes("_test_"), store: Store.memory() } as any);
+    // depositAddresses enables the Tempo method through Stripe (sandbox key -> Tempo testnet); without it only SPT cards are offered.
+    const dep = (cfg as any).TEMPO_DEPOSIT_ADDRESS ? { depositAddresses: { tempo: (cfg as any).TEMPO_DEPOSIT_ADDRESS } } : {};
+    const mp = stripe.create({ client, networkId: cfg.STRIPE_PROFILE_ID, livemode: !cfg.STRIPE_SECRET_KEY.includes("_test_"), store: Store.memory(), ...dep } as any);
     methods = await (mp as any).defaultMethods();
     methodNames = ["tempo", "spt"];
     recipient = cfg.STRIPE_PROFILE_ID;

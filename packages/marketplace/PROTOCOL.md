@@ -105,6 +105,9 @@ The attestation + receipt + grant form the **audit triple**: *what was paid, wha
 
 ### 2.8 Refund Voucher (Provider → Buyer) — issued when a paid grant becomes unfulfillable because of the provider's side (link outage, capacity revoked). Signed credit redeemable at that provider. (In this implementation: ledger credit + event; real money movement would use Stripe refunds when the Stripe rail is active.)
 
+### 2.9 Reconciliation (the audit triple, checked)
+For every grant: the MPP **receipt** proves what was paid; the **grant** proves what was authorised; the **attestation** (or refund voucher) proves what was done. Reconciliation verifies all three against the provider's manifest key and against each other: receipt present and referenced by the attestation; grant and attestation signatures valid; same `grant_id`/`node_id`; attested `compute_s`, `input_bytes`, `output_bytes` within the grant's limits (+10% framing); price within the quote; refund voucher amount equals the grant price. A provider whose attestation exceeds its own grant is flagged and marked **untrusted** in the registry; the broker will not route to it again until an operator clears it. The signature alone cannot catch this — only the three-way check can. (Broker tool `reconcile_mission`; `GET /reconcile/{mission_id}`.)
+
 ## 3. Plans and conditional commitment
 
 A **Plan** is an ordered list of legs, each `{node_from, node_to, window_id, grant?}` or `{node, op, window_id, grant?}`. The broker's planner only returns plans that are *physically* feasible (bytes fit windows, compute fits window, finish ≤ deadline) and *economically* feasible (Σ quotes ≤ budget). The buyer chooses among feasible plans (the LLM's job: trade latency vs cost vs output fidelity).
@@ -112,6 +115,14 @@ A **Plan** is an ordered list of legs, each `{node_from, node_to, window_id, gra
 Commitment is **conditional**: the broker places Holds on every leg, and only if all holds succeed does it pay (MPP) each provider and collect Grants. If any leg's hold fails, no money moves. This is what makes cross-owner purchase safe.
 
 ## 4. Replanning rules (what survives a disruption)
+
+Two failure events are deliberately different, and a credible protocol must handle both:
+
+| Event | When | What OCGP does | Money moved |
+|-------|------|----------------|-------------|
+| **E1 — provider withdraws before commit** | During PREPARE (holds placed, nothing paid) | The hold fails → all other holds are released → no `/reserve` is called → the compute job is never submitted | **$0** |
+| **E2 — provider fails after work started** | During EXECUTE (compute done, relay window killed) | Fulfilled grants are final: the result is preserved at the node that holds it; the unfulfilled paid grant is refunded by voucher; replan from the current state | Only fulfilled work is paid |
+
 
 1. **Fulfilled grants are final.** Their attestations and results are preserved; a replan starts from the node that holds the latest result.
 2. **Unfulfilled paid grants on a working provider stay valid** until `not_after`. A replan may reuse them.
@@ -128,6 +139,8 @@ Providers register their manifest URL with the broker (`POST /registry`), or the
 - **MPP / x402**: synchronous pay-per-request. OCGP uses MPP for the money and adds deferred, offline-verifiable, scoped grants bound to receipts.
 - **OAuth / macaroons / biscuit**: scoped bearer tokens. OCGP grants are similar in spirit but bound to a payment receipt and a physical contact window, and paired with a usage attestation.
 - **DTN / ION, EDRS, Kepler**: real delay-tolerant networking and relay. OCGP does not do networking; it does negotiation, authorisation, and settlement *above* such links.
+- **IETF DTN Peering Protocol draft (July 2026)**: inter-domain route discovery, time-dependent reachability and operator identity verification between DTN domains. It defines no economic reservations and no conditional purchase of compute together with communications. OCGP is the transactional service layer that would sit on top of DPP-style peering.
+- **Blockchain satellite task-offloading papers (2025)**: economic incentives for offloading, but no window-bound, offline-verifiable grants and no cross-owner conditional commitment with a defined partial-failure model.
 - **Satellite scheduling research (EarthSight etc.)**: centralised optimisation with full knowledge. OCGP is for *independent* owners with private policies, where no central optimiser can be trusted with everyone's state.
 
 What is new is the combination: payment-bound, window-bound, offline-verifiable capability grants + conditional cross-owner commitment + explicit disruption semantics + self-describing onboarding, in a form an autonomous agent can drive through MCP.
